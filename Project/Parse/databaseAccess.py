@@ -28,6 +28,8 @@ if not DROPBOX_ACCESS_TOKEN:
     raise ValueError("Missing required DropBox access token in .env")
 if not API_KEY:
     raise ValueError("Missing api_key")
+
+chat_history = []
 # =========================================
 # 2. Dropbox Setup
 # =========================================
@@ -174,15 +176,30 @@ def chat():
             return jsonify({"answer": "No relevant context found."})
 
         context = "\n\n".join(results["documents"][0])
+        if len(chat_history) > 10: 
+            chat_history.pop(0)
+        
+        chat_history.append({"role": "user", "content": user_query})
+
+        # Build context-aware conversation
+        messages = [{"role": "system", "content": (
+            "You are an expert research assistant that provides detailed, "
+            "well-structured, and insightful responses. "
+            "Always explain reasoning, give relevant examples, and cite context if available."
+            "always use the context provided unless it does not specify information related to the question"
+        )}]
+        messages += chat_history  # prior exchanges
+        messages.append({
+            "role": "user",
+            "content": f"Relevant context:\n{context}\n\nNow answer the latest question above using this context."
+        })
 
         payload = {
             "model": "openai/gpt-4o",
-            "messages": [
-                {"role": "system", "content": "You are a helpful research assistant."},
-                {"role": "user", "content": f"Use this context only:\n{context}\n\nQuestion: {user_query}"}
-            ],
+            "messages": messages,
             "extra_headers": {"HTTP-Referer": SITE_URL, "X-Title": SITE_TITLE}
         }
+        
 
         headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
         r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=60)
