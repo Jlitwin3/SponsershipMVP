@@ -12,7 +12,11 @@ results = collection.get(
 all_embeddings = results['embeddings']
 
 # You can then iterate through or process these embeddings as needed
-for embedding in all_embeddings:
-    print(embedding)
+"""for embedding in all_embeddings:
+    print(embedding)"""
+
+collections = client.list_collections()
+for c in collections:
+    print(c.name)
 
 
