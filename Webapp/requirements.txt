@@ -6,3 +6,9 @@ python-dotenv==1.0.0
 PyMuPDF==1.24.0
 requests==2.31.0
 werkzeug==3.0.1
+dropbox
+# OCR dependencies for image processing
+easyocr==1.7.0
+Pillow==10.2.0
+# Alternative OCR option (uncomment if you prefer Tesseract):
+# pytesseract==0.3.10
