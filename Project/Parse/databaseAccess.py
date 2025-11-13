@@ -10,10 +10,18 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import requests
 import threading
+import re
+from sponsorship.sponsor_manager import (
+    check_sponsor_conflict,
+    get_sponsor_info,
+    get_all_current_sponsors,
+    format_sponsor_context
+)
+from sponsorship.query_classifier import QueryClassifier
 # =========================================
 # 0. Skip Dropbox indexing if no new embeddings
 # =========================================
-SKIP_DROPBOX_INDEXING = True
+SKIP_DROPBOX_INDEXING = True  # Enable to index PDFs from Dropbox
 # =========================================
 # 1. Load environment variables
 # =========================================
@@ -37,17 +45,32 @@ chat_history = []
 # 2. Dropbox Setup
 # =========================================
 dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-DROPBOX_FOLDER = "/L’mu-Oa (Sports Sponsorship AI Project)"
- # ← Dropbox folder path
-res = dbx.files_list_folder('', recursive=True)
-for entry in res.entries:
-    print(entry.path_display)
+DROPBOX_FOLDER = "/L'mu-Oa (Sports Sponsorship AI Project)"  # Dropbox folder path
 
 # =========================================
 # 3. ChromaDB Setup (Persistent)
 # =========================================
 client = chromadb.PersistentClient(path="./chroma_db")
-collection = client.get_collection("pdf_embeddings")
+
+# Try to get existing collection first, create if it doesn't exist
+try:
+    collection = client.get_collection("pdf_embeddings")
+    print(f"✅ PDF collection found. Current count: {collection.count()}")
+except:
+    # Collection doesn't exist, create it
+    collection = client.create_collection(
+        name="pdf_embeddings",
+        metadata={"description": "PDF research papers"}
+    )
+    print(f"✅ Created new PDF collection")
+
+# Get image collection (if it exists)
+try:
+    image_collection = client.get_collection("image_embeddings")
+    print(f"✅ Image collection found with {image_collection.count()} embeddings")
+except:
+    image_collection = None
+    print("⚠️  No image collection found - only PDFs will be searched")
 
 # =========================================
 # 4. Flask Setup
@@ -56,6 +79,9 @@ app = Flask(__name__)
 CORS(app)
 
 processing_status = {"is_processing": False, "is_ready": False}
+
+# Initialize query classifier
+query_classifier = QueryClassifier()
 
 # =========================================
 # 5. Helper Functions
@@ -185,7 +211,37 @@ def index_pdfs_if_new():
     print("📚 All Dropbox PDFs processed and stored in ChromaDB!")
 
 # =========================================
-# 8. Query ChromaDB and Chat via OpenRouter
+# 8. Helper Functions for Sponsor Detection
+# =========================================
+def extract_sponsor_mentions(query: str) -> list:
+    """
+    Extract potential sponsor names from query.
+    Simple keyword matching - can be enhanced with NER later.
+    """
+    # Common sponsor keywords
+    sponsor_keywords = ["propose", "sponsor", "partnership", "deal", "agreement"]
+    query_lower = query.lower()
+
+    # Check if this is a sponsor-related query
+    if not any(kw in query_lower for kw in sponsor_keywords):
+        return []
+
+    # Try to extract company names (basic - looks for capitalized words)
+    # This is a simple heuristic - can be improved
+    words = query.split()
+    potential_sponsors = []
+
+    for i, word in enumerate(words):
+        # Remove punctuation
+        clean_word = re.sub(r'[^\w\s]', '', word)
+        # Check if word is capitalized and not a common word
+        if clean_word and clean_word[0].isupper() and clean_word.lower() not in ['can', 'we', 'should', 'would', 'what', 'how', 'why', 'when', 'where']:
+            potential_sponsors.append(clean_word)
+
+    return potential_sponsors
+
+# =========================================
+# 9. Query ChromaDB and Chat via OpenRouter
 # =========================================
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -199,11 +255,98 @@ def chat():
         return jsonify({"error": "PDFs still processing or not indexed yet."}), 400
 
     try:
-        results = collection.query(query_texts=[user_query], n_results=5)
-        if not results["documents"][0]:
+        # ===== Step 1: Classify the query =====
+        classification = query_classifier.classify(user_query)
+        print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})")
+
+        if classification['keywords']:
+            print(f"   Keywords: {', '.join(classification['keywords'][:3])}")
+        if classification['entities']:
+            print(f"   Detected brands: {', '.join(classification['entities'])}")
+
+        # ===== Step 2: Check sponsor database based on classification =====
+        sponsor_context = ""
+        sponsor_mentions = classification['entities'] if classification['needs_db'] else extract_sponsor_mentions(user_query)
+
+        if sponsor_mentions:
+            print(f"🔍 Detected potential sponsors in query: {sponsor_mentions}")
+
+            for sponsor_name in sponsor_mentions:
+                # Check for conflicts
+                conflict_info = check_sponsor_conflict(sponsor_name)
+
+                # Get detailed info if sponsor exists
+                sponsor_info = get_sponsor_info(sponsor_name)
+
+                if sponsor_info:
+                    sponsor_context += format_sponsor_context(sponsor_info) + "\n"
+                    print(f"✅ Found sponsor in database: {sponsor_name}")
+                elif conflict_info['conflict']:
+                    sponsor_context += f"\n[Important Sponsorship Notice]\n"
+                    sponsor_context += f"Regarding {sponsor_name}:\n"
+                    sponsor_context += f"{conflict_info['details']}\n"
+                    if conflict_info['existing_sponsor']:
+                        sponsor_context += f"Current Partner: {conflict_info['existing_sponsor']} ({conflict_info['category']})\n"
+                    sponsor_context += "\n"
+                    print(f"⚠️  Sponsor conflict detected: {sponsor_name}")
+
+        # ===== Step 3: Query vector databases (adjust based on classification) =====
+        # Adjust retrieval based on query type
+        if classification['type'] == query_classifier.TEMPORAL:
+            # For temporal queries, get more results to find recent ones
+            pdf_count = 7
+            image_count = 4
+            print("   Using expanded search for temporal query")
+        elif classification['type'] == query_classifier.LIST_REQUEST:
+            # For list requests, get more diverse results
+            pdf_count = 8
+            image_count = 4
+            print("   Using expanded search for list request")
+        else:
+            # Standard retrieval
+            pdf_count = 5
+            image_count = 3
+
+        pdf_results = collection.query(query_texts=[user_query], n_results=pdf_count)
+
+        # Initialize combined results
+        all_documents = []
+        all_metadatas = []
+
+        # Add PDF results
+        if pdf_results["documents"][0]:
+            all_documents.extend(pdf_results["documents"][0])
+            all_metadatas.extend(pdf_results["metadatas"][0])
+
+        # Query image collection if it exists
+        if image_collection is not None:
+            try:
+                image_results = image_collection.query(query_texts=[user_query], n_results=image_count)
+                if image_results["documents"][0]:
+                    all_documents.extend(image_results["documents"][0])
+                    all_metadatas.extend(image_results["metadatas"][0])
+                    print(f"✅ Found {len(image_results['documents'][0])} relevant image chunks")
+            except Exception as img_err:
+                print(f"⚠️  Error querying image collection: {img_err}")
+
+        # Check if we have any results
+        if not all_documents and not sponsor_context:
             return jsonify({"answer": "No relevant context found."})
 
-        context = "\n\n".join(results["documents"][0])
+        # Build context with source labels
+        context_parts = []
+
+        # Add sponsor database context first (highest priority)
+        if sponsor_context:
+            context_parts.append(sponsor_context)
+
+        # Then add PDF and image results
+        for doc, meta in zip(all_documents, all_metadatas):
+            source_type = meta.get('type', 'pdf')
+            source_name = meta.get('source', 'unknown')
+            context_parts.append(f"[From {source_type}: {source_name}]\n{doc}")
+
+        context = "\n\n".join(context_parts)
         if len(chat_history) > 10: 
             chat_history.pop(0)
         
@@ -211,11 +354,17 @@ def chat():
 
         # Build context-aware conversation
         messages = [{"role": "system", "content": (
-            "You are an expert research assistant that provides detailed, "
-            "well-structured, and insightful responses. "
-            "Always explain reasoning, give relevant examples, and cite context if available. If "
-            "you are referencing a link, always convert it to a hyperlink"
-
+            "You are an expert sports sponsorship research assistant for University of Oregon Athletics. "
+            "You provide detailed, well-structured, and insightful responses about sponsorships, partnerships, and sports business.\n\n"
+            "IMPORTANT RULES:\n"
+            "1. When 'Current UO Sponsor Information' is provided, treat it as authoritative official data\n"
+            "2. When 'Important Sponsorship Notice' appears, clearly explain why conflicts exist\n"
+            "3. Cite your sources naturally (e.g., 'According to current partnership records...' or 'Based on university documents...')\n"
+            "4. When discussing existing sponsors, mention their exclusivity status if relevant\n"
+            "5. If you reference a link, convert it to a hyperlink\n"
+            "6. Be direct and clear about conflicts - students need accurate guidance\n"
+            "7. Write in a professional but conversational tone - avoid overly technical database language\n\n"
+            "Your goal is to educate students about UO sponsorship opportunities and constraints."
         )}]
         messages += chat_history  # prior exchanges
         messages.append({
@@ -253,15 +402,44 @@ def chat():
 
 @app.route("/api/status", methods=["GET"])
 def status():
+    image_count = image_collection.count() if image_collection else 0
     return jsonify({
         "processed": processing_status["is_ready"],
         "is_processing": processing_status["is_processing"],
-        "collection_size": collection.count()
+        "collection_size": collection.count(),
+        "image_collection_size": image_count,
+        "total_documents": collection.count() + image_count
     })
 
 
+@app.route("/api/sponsors", methods=["GET"])
+def list_sponsors():
+    """Get all current sponsors from the database."""
+    try:
+        sponsors = get_all_current_sponsors()
+        return jsonify({
+            "sponsors": sponsors,
+            "count": len(sponsors)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/sponsors/<sponsor_name>", methods=["GET"])
+def get_sponsor_details(sponsor_name):
+    """Get detailed information about a specific sponsor."""
+    try:
+        sponsor_info = get_sponsor_info(sponsor_name)
+        if sponsor_info:
+            return jsonify(sponsor_info)
+        else:
+            return jsonify({"error": f"Sponsor '{sponsor_name}' not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # =========================================
-# 9. Startup
+# 10. Startup
 # =========================================
 if __name__ == "__main__":
     if not SKIP_DROPBOX_INDEXING:

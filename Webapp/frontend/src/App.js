@@ -39,15 +39,15 @@ function App() {
     <div className="App">
       <header className="App-header">
         <h1>L'mu-Oa: AI Sponsorship Assistant</h1>
-        <p>Discover. Analyze. Propose. All with L’mu-Oa</p>
+        <p>Discover. Analyze. Propose. All with L'mu-Oa</p>
       </header>
 
       <main className="App-main">
         {isProcessing ? (
           <div className="loading-container">
             <div className="spinner"></div>
-            <h2>Processing PDFs...</h2>
-            <p>Loading and analyzing research papers. This may take a minute.</p>
+            <h2>Processing Documents...</h2>
+            <p>Loading PDFs and images from Dropbox. This may take a minute.</p>
           </div>
         ) : isReady ? (
           <ChatInterface />
