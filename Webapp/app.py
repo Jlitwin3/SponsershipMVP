@@ -9,6 +9,7 @@ import fitz  # PyMuPDF
 import requests
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import tempfile
 
 # Add parent directory to path to import OpenRouter functions
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Parse'))
@@ -31,6 +32,14 @@ PDF_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'Parse', 'pdfs')
 
 # Global storage for processed documents
 processed_documents = {
+    'chunks': [],
+    'embeddings': None,
+    'is_processing': False,
+    'is_ready': False
+}
+
+# Temporary storage for user-uploaded PDFs (session-based, not persisted)
+temp_documents = {
     'chunks': [],
     'embeddings': None,
     'is_processing': False,
@@ -162,8 +171,21 @@ def chat():
 
     user_query = data['query']
 
+    # Combine permanent and temporary documents
+    all_chunks = processed_documents['chunks'] + temp_documents['chunks']
+
+    # Combine embeddings if both exist
+    if processed_documents['embeddings'] is not None and temp_documents['embeddings'] is not None:
+        all_embeddings = np.vstack([processed_documents['embeddings'], temp_documents['embeddings']])
+    elif processed_documents['embeddings'] is not None:
+        all_embeddings = processed_documents['embeddings']
+    elif temp_documents['embeddings'] is not None:
+        all_embeddings = temp_documents['embeddings']
+    else:
+        all_embeddings = None
+
     # Check if documents are processed
-    if not processed_documents['chunks'] or processed_documents['embeddings'] is None:
+    if not all_chunks or all_embeddings is None:
         return jsonify({'error': 'No documents processed yet. Please upload PDFs first.'}), 400
 
     try:
@@ -174,10 +196,10 @@ def chat():
             print("⚠️ Warning: Query embedding failed. Answers may be inaccurate.")
 
         # Retrieve top-k relevant chunks
-        similarities = cosine_similarity([q_emb], processed_documents['embeddings'])[0]
-        top_k = min(5, len(processed_documents['chunks']))
+        similarities = cosine_similarity([q_emb], all_embeddings)[0]
+        top_k = min(5, len(all_chunks))
         top_indices = similarities.argsort()[-top_k:][::-1]
-        retrieved_chunks = [processed_documents['chunks'][i] for i in top_indices]
+        retrieved_chunks = [all_chunks[i] for i in top_indices]
         context_text = "\n\n".join(retrieved_chunks)
 
         # Call OpenRouter chat API
@@ -227,6 +249,115 @@ def status():
         'is_processing': processed_documents['is_processing'],
         'chunks': len(processed_documents['chunks'])
     })
+
+@app.route('/api/upload-temp', methods=['POST'])
+def upload_temp():
+    """Handle temporary PDF uploads (not saved to database)"""
+    if 'pdfs' not in request.files:
+        return jsonify({'error': 'No PDF files provided'}), 400
+
+    files = request.files.getlist('pdfs')
+
+    if not files:
+        return jsonify({'error': 'No files selected'}), 400
+
+    print(f"\n📤 Received {len(files)} temporary PDF(s) for upload")
+    temp_documents['is_processing'] = True
+
+    try:
+        documents = []
+
+        # Process each uploaded PDF
+        for file in files:
+            if file.filename == '':
+                continue
+
+            if not file.filename.lower().endswith('.pdf'):
+                continue
+
+            # Save to temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                file.save(temp_file.name)
+                temp_path = temp_file.name
+
+            try:
+                # Extract text from PDF
+                doc = fitz.open(temp_path)
+                text = "".join([page.get_text() + "\n" for page in doc])
+                doc.close()
+
+                if text.strip():
+                    documents.append(text)
+                    print(f"✅ Extracted text from: {file.filename} ({len(text)} chars)")
+                else:
+                    print(f"⚠️ No text found in: {file.filename}")
+
+            except Exception as e:
+                print(f"❌ Failed to read {file.filename}: {e}")
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        if not documents:
+            temp_documents['is_processing'] = False
+            return jsonify({'error': 'No text extracted from any PDFs'}), 400
+
+        # Split text into chunks
+        chunk_size = 500
+        chunks = [doc[i:i + chunk_size] for doc in documents for i in range(0, len(doc), chunk_size)]
+        print(f"📚 Created {len(chunks)} text chunks from temporary uploads.")
+
+        # Generate embeddings
+        def embed_chunk(i, chunk):
+            emb = get_embedding_openrouter(chunk)
+            if emb.shape[0] != 3072:
+                if emb.shape[0] > 3072:
+                    emb = emb[:3072]
+                else:
+                    emb = np.pad(emb, (0, 3072 - emb.shape[0]))
+            return i, emb
+
+        embeddings = []
+        print("⚙️ Generating embeddings for temporary PDFs...")
+        with ThreadPoolExecutor(max_workers=min(10, len(chunks))) as executor:
+            futures = [executor.submit(embed_chunk, i, chunk) for i, chunk in enumerate(chunks)]
+            for future in as_completed(futures):
+                i, emb = future.result()
+                embeddings.append((i, emb))
+                print(f"  ✅ Chunk {i+1}/{len(chunks)} embedding done")
+
+        embeddings.sort(key=lambda x: x[0])
+        embeddings = np.stack([emb for _, emb in embeddings])
+
+        # Store in temporary documents
+        temp_documents['chunks'] = chunks
+        temp_documents['embeddings'] = embeddings
+        temp_documents['is_processing'] = False
+        temp_documents['is_ready'] = True
+
+        print("✅ Temporary PDFs processed successfully!\n")
+
+        return jsonify({
+            'success': True,
+            'message': f'Successfully processed {len(files)} PDF(s)',
+            'chunks': len(chunks)
+        })
+
+    except Exception as e:
+        print(f"❌ Upload failed: {e}")
+        temp_documents['is_processing'] = False
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/clear-temp', methods=['POST'])
+def clear_temp():
+    """Clear temporary uploaded documents"""
+    temp_documents['chunks'] = []
+    temp_documents['embeddings'] = None
+    temp_documents['is_processing'] = False
+    temp_documents['is_ready'] = False
+    print("🗑️ Cleared temporary documents")
+    return jsonify({'success': True, 'message': 'Temporary documents cleared'})
 
 if __name__ == '__main__':
     # Load PDFs on startup in a background thread

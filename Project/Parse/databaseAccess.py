@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 import requests
 import threading
 import re
+import tempfile
 from sponsorship.sponsor_manager import (
     check_sponsor_conflict,
     get_sponsor_info,
@@ -79,6 +80,13 @@ app = Flask(__name__)
 CORS(app)
 
 processing_status = {"is_processing": False, "is_ready": False}
+
+# Temporary storage for user-uploaded PDFs (session-based, not persisted to ChromaDB)
+temp_documents = {
+    'texts': [],  # Store raw text chunks
+    'is_processing': False,
+    'is_ready': False
+}
 
 # Initialize query classifier
 query_classifier = QueryClassifier()
@@ -353,6 +361,12 @@ def chat():
             source_name = meta.get('source', 'unknown')
             context_parts.append(f"[From {source_type}: {source_name}]\n{doc}")
 
+        # Add temporary uploaded documents if available
+        if temp_documents['is_ready'] and temp_documents['texts']:
+            print(f"📄 Including {len(temp_documents['texts'])} temporary document chunks")
+            for temp_text in temp_documents['texts'][:5]:  # Limit to 5 chunks
+                context_parts.append(f"[From temporary upload]\n{temp_text}")
+
         context = "\n\n".join(context_parts)
         if len(chat_history) > 10: 
             chat_history.pop(0)
@@ -443,6 +457,97 @@ def get_sponsor_details(sponsor_name):
             return jsonify({"error": f"Sponsor '{sponsor_name}' not found"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/upload-temp', methods=['POST'])
+def upload_temp():
+    """Handle temporary PDF uploads (not saved to ChromaDB)"""
+    if 'pdfs' not in request.files:
+        return jsonify({'error': 'No PDF files provided'}), 400
+
+    files = request.files.getlist('pdfs')
+
+    if not files:
+        return jsonify({'error': 'No files selected'}), 400
+
+    print(f"\n📤 Received {len(files)} temporary PDF(s) for upload")
+    temp_documents['is_processing'] = True
+
+    try:
+        documents = []
+
+        # Process each uploaded PDF
+        for file in files:
+            if file.filename == '':
+                continue
+
+            if not file.filename.lower().endswith('.pdf'):
+                continue
+
+            # Save to temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                file.save(temp_file.name)
+                temp_path = temp_file.name
+
+            try:
+                # Extract text from PDF
+                doc = fitz.open(temp_path)
+                text = "".join([page.get_text() + "\n" for page in doc])
+                doc.close()
+
+                if text.strip():
+                    documents.append(text)
+                    print(f"✅ Extracted text from: {file.filename} ({len(text)} chars)")
+                else:
+                    print(f"⚠️ No text found in: {file.filename}")
+
+            except Exception as e:
+                print(f"❌ Failed to read {file.filename}: {e}")
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        if not documents:
+            temp_documents['is_processing'] = False
+            return jsonify({'error': 'No text extracted from any PDFs'}), 400
+
+        # Split text into chunks (similar to ChromaDB chunks)
+        chunk_size = 500
+        chunks = []
+        for doc in documents:
+            for i in range(0, len(doc), chunk_size):
+                chunks.append(doc[i:i + chunk_size])
+
+        print(f"📚 Created {len(chunks)} text chunks from temporary uploads.")
+
+        # Store in temporary documents (just text, ChromaDB will handle embedding on query)
+        temp_documents['texts'] = chunks
+        temp_documents['is_processing'] = False
+        temp_documents['is_ready'] = True
+
+        print("✅ Temporary PDFs processed successfully!\n")
+
+        return jsonify({
+            'success': True,
+            'message': f'Successfully processed {len(files)} PDF(s)',
+            'chunks': len(chunks)
+        })
+
+    except Exception as e:
+        print(f"❌ Upload failed: {e}")
+        temp_documents['is_processing'] = False
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/clear-temp', methods=['POST'])
+def clear_temp():
+    """Clear temporary uploaded documents"""
+    temp_documents['texts'] = []
+    temp_documents['is_processing'] = False
+    temp_documents['is_ready'] = False
+    print("🗑️ Cleared temporary documents")
+    return jsonify({'success': True, 'message': 'Temporary documents cleared'})
 
 
 # =========================================
