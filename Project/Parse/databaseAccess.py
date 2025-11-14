@@ -259,6 +259,13 @@ def chat():
         classification = query_classifier.classify(user_query)
         print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})")
 
+        # Check if query is off-topic
+        if classification['type'] == query_classifier.OFF_TOPIC:
+            print("⚠️  Off-topic query detected - returning polite message")
+            return jsonify({
+                "answer": "I apologize, but I'm specifically designed to answer questions about sports sponsorships, particularly related to the University of Oregon's athletic partnerships. I don't have information to help with that topic. Feel free to ask me about sponsorship deals, brand partnerships, or anything related to sports marketing and sponsorships!"
+            }), 200
+
         if classification['keywords']:
             print(f"   Keywords: {', '.join(classification['keywords'][:3])}")
         if classification['entities']:

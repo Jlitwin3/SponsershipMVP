@@ -51,3 +51,8 @@ chroma_db/chroma.sqlite3
 
 # Logs
 *.log
+
+# Claude Code artifacts
+FINAL_SUMMARY.md
+JPEG_PROCESSING_README.md
+.claude/

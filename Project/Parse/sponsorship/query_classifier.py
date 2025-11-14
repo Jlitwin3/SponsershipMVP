@@ -20,6 +20,7 @@ class QueryClassifier:
     ANALYSIS = "analysis"                   # Deep analysis, comparisons, recommendations
     GENERAL = "general"                     # General questions about sponsorships
     LIST_REQUEST = "list_request"          # Asking for lists of sponsors/categories
+    OFF_TOPIC = "off_topic"                # Query not related to sponsorships
 
     def __init__(self):
         # Keywords for each category
@@ -49,6 +50,14 @@ class QueryClassifier:
             'tell me about our', 'current partners', 'charter partners'
         ]
 
+        # Sponsorship-related keywords to determine if query is on-topic
+        self.sponsorship_keywords = [
+            'sponsor', 'sponsorship', 'partner', 'partnership', 'brand', 'deal',
+            'contract', 'agreement', 'nike', 'adidas', 'under armour', 'charter',
+            'apparel', 'footwear', 'athletic', 'athletics', 'sports', 'college',
+            'university', 'oregon', 'uo', 'ducks', 'marketing', 'endorsement'
+        ]
+
     def classify(self, query: str) -> Dict:
         """
         Classify a query and return classification details.
@@ -71,6 +80,22 @@ class QueryClassifier:
 
         # Extract potential company/brand names (capitalized words)
         entities = self._extract_entities(query)
+
+        # Check if query is related to sponsorships at all
+        is_on_topic = self._is_sponsorship_related(query_lower)
+
+        # If off-topic, return immediately
+        if not is_on_topic:
+            return {
+                'type': self.OFF_TOPIC,
+                'confidence': 0.9,
+                'keywords': [],
+                'entities': [],
+                'needs_web': False,
+                'needs_db': False,
+                'time_sensitive': False,
+                'all_scores': {}
+            }
 
         # Score each category
         scores = {
@@ -109,6 +134,11 @@ class QueryClassifier:
             'time_sensitive': time_sensitive,
             'all_scores': scores
         }
+
+    def _is_sponsorship_related(self, query: str) -> bool:
+        """Check if query is related to sponsorships at all."""
+        # Check if any sponsorship keywords are present
+        return any(keyword in query for keyword in self.sponsorship_keywords)
 
     def _score_keywords(self, query: str, keywords: List[str]) -> float:
         """Score how many keywords match in the query."""

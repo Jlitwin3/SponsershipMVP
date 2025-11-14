@@ -156,8 +156,8 @@ const ChatInterface = () => {
 
       <div className="messages-container">
         {messages.map((message, index) => (
-          <div 
-            key={index} 
+          <div
+            key={index}
             className={`message ${message.role} ${message.isError ? 'error' : ''}`}
           >
             <div className="message-content">
@@ -229,4 +229,3 @@ const ChatInterface = () => {
 };
 
 export default ChatInterface;
-

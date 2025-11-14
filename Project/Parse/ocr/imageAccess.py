@@ -31,7 +31,7 @@ SKIP_DROPBOX_INDEXING = True  # Set to True to skip Dropbox scanning (we want to
 # =========================================
 # 1. Load environment variables
 # =========================================
-env_path = os.path.join(os.path.dirname(__file__), ".env")
+env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 load_dotenv(env_path)
 if not env_path:
     raise ValueError("no env path")
