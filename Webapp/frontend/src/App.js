@@ -1,11 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import ChatInterface from './components/ChatInterface';
+import UploadPDF from './components/UploadPDF';
 
 function App() {
   const [isReady, setIsReady] = useState(false);
   const [isProcessing, setIsProcessing] = useState(true);
   const [error, setError] = useState(null);
+  const [showConsent, setShowConsent] = useState(true);
+  const [hasConsented, setHasConsented] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+
+  const handleConsent = () => {
+    setHasConsented(true);
+    setShowConsent(false);
+  };
+
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
+  };
+
+  const openUpload = () => {
+    setShowUpload(true);
+    setIsSidebarOpen(false);
+  };
+
+  const closeUpload = () => {
+    setShowUpload(false);
+  };
 
   useEffect(() => {
     // Poll for status until documents are ready
@@ -37,6 +60,52 @@ function App() {
 
   return (
     <div className="App">
+      {showConsent && (
+        <div className="consent-overlay">
+          <div className="consent-modal">
+            <h2>Data Usage Disclosure</h2>
+            <div className="consent-content">
+              <ul>
+                <li>This tool does not store personal identifying information (PII).</li>
+                <li>All submitted content will be accessible to instructors.</li>
+                <li>Do not enter restricted / copyrighted content verbatim.</li>
+              </ul>
+              <div className="consent-agreement">
+                <p>By clicking Continue, you agree to these terms.</p>
+              </div>
+            </div>
+            <button className="consent-button" onClick={handleConsent}>
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sidebar */}
+      <div className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
+        <div className="sidebar-content">
+          <h3>Navigation</h3>
+          <nav className="sidebar-nav">
+            <button className="sidebar-link" onClick={openUpload}>
+              <span className="sidebar-icon">📄</span>
+              Upload Temporary PDFs
+            </button>
+          </nav>
+        </div>
+      </div>
+
+      {/* Sidebar overlay for mobile */}
+      {isSidebarOpen && <div className="sidebar-overlay" onClick={toggleSidebar}></div>}
+
+      {/* Toggle button */}
+      <button className="sidebar-toggle" onClick={toggleSidebar}>
+        <span className={`hamburger ${isSidebarOpen ? 'open' : ''}`}>
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+
       <header className="App-header">
         <h1>L'mu-Oa: AI Sponsorship Assistant</h1>
         <p>Discover. Analyze. Propose. All with L'mu-Oa</p>
@@ -62,6 +131,13 @@ function App() {
       {error && isReady && (
         <div className="error-message">
           <span>❌ {error}</span>
+        </div>
+      )}
+
+      {/* Upload PDF Modal */}
+      {showUpload && (
+        <div className="upload-modal-overlay">
+          <UploadPDF onClose={closeUpload} />
         </div>
       )}
     </div>
