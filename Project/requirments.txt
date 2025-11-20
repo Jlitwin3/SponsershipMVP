@@ -1,8 +1,9 @@
 flask
 flask-cors
+gunicorn
+chromadb
+dropbox
 python-dotenv
 requests
-PyMuPDF
-dropbox
-chromadb
+pymupdf
 numpy
