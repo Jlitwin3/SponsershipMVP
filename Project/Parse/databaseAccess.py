@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 import requests
 import threading
 import re
+from werkzeug.utils import secure_filename
+import shutil
 from sponsorship.sponsor_manager import (
     check_sponsor_conflict,
     get_sponsor_info,
@@ -21,7 +23,7 @@ from sponsorship.query_classifier import QueryClassifier
 # =========================================
 # 0. Skip Dropbox indexing if no new embeddings
 # =========================================
-SKIP_DROPBOX_INDEXING = True  # Enable to index PDFs from Dropbox
+SKIP_DROPBOX_INDEXING = False  # Enable to index PDFs from Dropbox
 # =========================================
 # 1. Load environment variables
 # =========================================
@@ -45,12 +47,17 @@ chat_history = []
 # 2. Dropbox Setup
 # =========================================
 dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-DROPBOX_FOLDER = "/L'mu-Oa (Sports Sponsorship AI Project)"  # Dropbox folder path
+DROPBOX_FOLDER = "/L’mu-Oa (Sports Sponsorship AI Project)"  # Dropbox folder path
 
 # =========================================
 # 3. ChromaDB Setup (Persistent)
 # =========================================
-client = chromadb.PersistentClient(path="./chroma_db")
+# Use absolute path for external storage (hidden folder in user's home dir)
+CHROMA_DB_PATH = os.path.expanduser("~/.chroma_db_data")
+if not os.path.exists(CHROMA_DB_PATH):
+    os.makedirs(CHROMA_DB_PATH)
+
+client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
 # Try to get existing collection first, create if it doesn't exist
 try:
@@ -77,6 +84,17 @@ except:
 # =========================================
 app = Flask(__name__)
 CORS(app)
+
+# Configure upload folder
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 processing_status = {"is_processing": False, "is_ready": False}
 
@@ -162,7 +180,7 @@ def index_pdfs_if_new():
     # ✅ Correctly fetch existing IDs
     existing_ids = get_all_ids(collection)
     print("length of ids: ", len(existing_ids))
-
+    skipped = 0
     for file_metadata in pdf_files:
         pdf_id = file_metadata.id or file_metadata.name
 
@@ -188,6 +206,7 @@ def index_pdfs_if_new():
 
             if not chunks:
                 print(f"⚠️ Skipping {file_metadata.name} — no text extracted.")
+                skipped += 1
                 continue
 
             base_id = pdf_id if pdf_id else file_metadata.name.replace(" ", "_").replace(".pdf", "")
@@ -209,7 +228,7 @@ def index_pdfs_if_new():
     processing_status["is_processing"] = False
     processing_status["is_ready"] = True
     print("📚 All Dropbox PDFs processed and stored in ChromaDB!")
-
+    print(f"Skipped {skipped} files")
 # =========================================
 # 8. Helper Functions for Sponsor Detection
 # =========================================
@@ -260,12 +279,13 @@ def chat():
         print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})")
 
         # Check if query is off-topic
+        """
         if classification['type'] == query_classifier.OFF_TOPIC:
             print("⚠️  Off-topic query detected - returning polite message")
             return jsonify({
                 "answer": "I apologize, but I'm specifically designed to answer questions about sports sponsorships, particularly related to the University of Oregon's athletic partnerships. I don't have information to help with that topic. Feel free to ask me about sponsorship deals, brand partnerships, or anything related to sports marketing and sponsorships!"
             }), 200
-
+        """
         if classification['keywords']:
             print(f"   Keywords: {', '.join(classification['keywords'][:3])}")
         if classification['entities']:
@@ -371,7 +391,9 @@ def chat():
             "5. If you reference a link, convert it to a hyperlink\n"
             "6. Be direct and clear about conflicts - students need accurate guidance\n"
             "7. Write in a professional but conversational tone - avoid overly technical database language\n\n"
-            "Your goal is to educate students about UO sponsorship opportunities and constraints."
+            "8. Your goal is to educate students about UO sponsorship opportunities and constraints."
+            "9. if your response is not relevant to the question, respond with a polite message and ask for clarification."
+            "10. if asked for a list of the current sponsors, respond with an ordered list of the sponsors."
         )}]
         messages += chat_history  # prior exchanges
         messages.append({
@@ -430,6 +452,70 @@ def list_sponsors():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/upload", methods=["POST"])
+def upload_file():
+    if 'files' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    
+    files = request.files.getlist('files')
+    
+    if not files or files[0].filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    processed_count = 0
+    errors = []
+
+    for file in files:
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            
+            try:
+                # Process the file based on extension
+                ext = filename.rsplit('.', 1)[1].lower()
+                
+                if ext == 'pdf':
+                    # Process PDF immediately
+                    with fitz.open(filepath) as doc:
+                        text = "".join(page.get_text() for page in doc)
+                    
+                    chunks = chunk_text(text)
+                    if chunks:
+                        base_id = filename.replace(" ", "_").replace(".pdf", "")
+                        ids = [f"{base_id}_chunk{i}" for i in range(len(chunks))]
+                        
+                        collection.add(
+                            ids=ids,
+                            documents=chunks,
+                            metadatas=[{"source": filename, "type": "pdf", "rev": "manual_upload"}] * len(chunks)
+                        )
+                        processed_count += 1
+                    else:
+                        errors.append(f"No text extracted from {filename}")
+                        
+                elif ext in ['jpg', 'jpeg']:
+                    # Placeholder for JPEG processing
+                    # TODO: Implement OCR or image embedding
+                    print(f"Received image: {filename}. Stored but not yet processed.")
+                    # For now, we just acknowledge receipt
+                    processed_count += 1
+                    
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
+                errors.append(f"Failed to process {filename}: {str(e)}")
+        else:
+            errors.append(f"Skipped {file.filename}: Invalid file type")
+
+    if processed_count > 0:
+        return jsonify({
+            "message": f"Successfully processed {processed_count} files",
+            "errors": errors
+        })
+    else:
+        return jsonify({"error": "Failed to process files", "details": errors}), 500
 
 
 @app.route("/api/sponsors/<sponsor_name>", methods=["GET"])

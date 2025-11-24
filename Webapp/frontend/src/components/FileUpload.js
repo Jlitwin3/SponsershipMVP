@@ -30,7 +30,7 @@ const FileUpload = ({ onFilesProcessed, onError, loading, setLoading }) => {
     });
 
     try {
-      const response = await fetch('http://localhost:5000/api/upload', {
+      const response = await fetch('http://localhost:5001/api/upload', {
         method: 'POST',
         body: formData
       });
@@ -54,7 +54,7 @@ const FileUpload = ({ onFilesProcessed, onError, loading, setLoading }) => {
   const handleDrop = (e) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files).filter(
-      file => file.type === 'application/pdf'
+      file => file.type === 'application/pdf' || file.type === 'image/jpeg' || file.type === 'image/jpg'
     );
     setSelectedFiles([...selectedFiles, ...files]);
   };
@@ -80,8 +80,8 @@ const FileUpload = ({ onFilesProcessed, onError, loading, setLoading }) => {
       >
         <div className="drop-zone-content">
           <div className="upload-icon">📄</div>
-          <h2>Upload PDF Files</h2>
-          <p>Drag and drop PDF files here, or click to select</p>
+          <h2>Upload Documents</h2>
+          <p>Drag and drop PDF or JPEG files here, or click to select</p>
           <button
             className="select-button"
             onClick={() => fileInputRef.current.click()}
@@ -92,7 +92,7 @@ const FileUpload = ({ onFilesProcessed, onError, loading, setLoading }) => {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,.jpg,.jpeg"
             multiple
             onChange={handleFileChange}
             style={{ display: 'none' }}
