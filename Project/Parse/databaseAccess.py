@@ -89,15 +89,11 @@ except:
 # =========================================
 # 4. Flask Setup
 # =========================================
-# =========================================
-# 4. Flask Setup
-# =========================================
-# Point to the React build folder
-app = Flask(__name__, static_folder='../../Webapp/frontend/build', static_url_path='/')
-CORS(app)
+# Point to the React build folder (absolute path for Render compatibility)
+BUILD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Webapp', 'frontend', 'build')
+app = Flask(__name__, static_folder=BUILD_FOLDER, static_url_path='/')
 CORS(app)
 
-# Configure upload folder
 # Configure upload folder
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 if not os.path.exists(UPLOAD_FOLDER):
