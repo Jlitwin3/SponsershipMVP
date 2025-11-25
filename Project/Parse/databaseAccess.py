@@ -390,6 +390,8 @@ def chat():
             "news" in user_query.lower() or
             "sponsors" in user_query.lower()
         )
+        
+        print(f"🔍 Search decision: should_search={should_search}, classification={classification['type']}, doc_count={len(all_documents)}, has_sponsors={'sponsors' in user_query.lower()}")
 
         if should_search:
             print("🌍 Performing web search for:", user_query)
