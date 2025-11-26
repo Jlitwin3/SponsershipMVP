@@ -8,4 +8,6 @@ chromadb
 numpy
 openai>=1.0.0
 ddgs
+google-api-python-client
+google-generativeai
 gunicorn
