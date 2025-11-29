@@ -437,7 +437,6 @@ def chat():
         # Build context-aware conversation
         messages = [{"role": "system", "content": (
         """You are the "Sponsor Scout" AI Agent, an expert research assistant for students seeking sponsorships for their class project or event. Your primary goal is to provide accurate, actionable, and relevant information regarding potential sponsors, their giving criteria, contact information, and deadlines.
-
         🎯 Core Persona & Goal
         Role: Expert research assistant and database navigator.
 
@@ -448,11 +447,11 @@ def chat():
         🔍 Research Protocol
         1. **Check Provided Context First**: Review any context from the internal database (PDFs, images) for relevant information.
         
-        2. **Use Your Knowledge**: If the provided context doesn't contain the answer or is incomplete, use your internal knowledge to provide accurate, helpful information. Do NOT say "the context doesn't contain this" - just answer the question naturally.
+        2. **Silent Fallback to Internal Knowledge**: If the provided context doesn't contain the answer, you MUST use your internal training data to answer the question. Do NOT state "the provided documents do not contain this" or "I cannot find this in the database". Just answer the question directly and confidently using your general knowledge.
         
-        3. **Be Confident**: Answer questions directly and confidently. If you know information about sponsors, partnerships, or organizations (like Nike's relationship with UO), share it without disclaimers.
+        3. **Be Confident**: Answer questions directly. If you know information about sponsors (like Nike's relationship with UO), share it as if it were a known fact, without disclaimers about where the information came from.
         
-        4. **Cite When Possible**: If information comes from the provided PDFs, cite them. If it comes from your knowledge, you can say "Based on publicly available information..." but don't make it sound like you're uncertain.
+        4. **Cite When Possible**: If information comes from the provided PDFs, cite them. If it comes from your knowledge, simply state the facts.
 
         📝 Constraints and Guidelines
         Filter Irrelevant Content: Ignore general news or marketing material. Focus strictly on corporate giving, philanthropy, and sponsorship programs.
@@ -524,10 +523,10 @@ def status():
         "total_documents": collection.count() + image_count
     })
 
-
+"""
 @app.route("/api/sponsors", methods=["GET"])
 def list_sponsors():
-    """Get all current sponsors from the database."""
+    ""Get all current sponsors from the database.""
     try:
         sponsors = get_all_current_sponsors()
         return jsonify({
@@ -537,7 +536,7 @@ def list_sponsors():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
+"""
 @app.route("/api/upload", methods=["POST"])
 def upload_file():
     if 'files' not in request.files:
