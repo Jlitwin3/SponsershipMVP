@@ -3,7 +3,7 @@ services:
     name: sponsorship-mvp
     env: python
     plan: free
-    buildCommand: "./build.sh"
+    buildCommand: "bash build.sh"
     startCommand: "gunicorn Project.Parse.databaseAccess:app"
     #disk:
     #  name: chroma-data
