@@ -98,6 +98,14 @@ except:
 # =========================================
 # Point to the React build folder (absolute path for Render compatibility)
 BUILD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Webapp', 'frontend', 'build')
+print(f"🔍 BUILD_FOLDER path: {BUILD_FOLDER}")
+print(f"🔍 BUILD_FOLDER exists: {os.path.exists(BUILD_FOLDER)}")
+if os.path.exists(BUILD_FOLDER):
+    print(f"🔍 Files in BUILD_FOLDER: {os.listdir(BUILD_FOLDER)[:10]}")  # Show first 10 files
+else:
+    print(f"❌ BUILD_FOLDER not found! Current working directory: {os.getcwd()}")
+    print(f"❌ __file__ location: {os.path.abspath(__file__)}")
+    
 app = Flask(__name__, static_folder=BUILD_FOLDER, static_url_path='/')
 CORS(app)
 
@@ -112,10 +120,23 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
-    if path != "" and os.path.exists(app.static_folder + '/' + path):
-        return app.send_static_file(path)
-    else:
-        return app.send_static_file('index.html')
+    try:
+        if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+            return app.send_static_file(path)
+        else:
+            index_path = os.path.join(app.static_folder, 'index.html')
+            if os.path.exists(index_path):
+                return app.send_static_file('index.html')
+            else:
+                # Fallback if build folder doesn't exist
+                return jsonify({
+                    "error": "Frontend not built",
+                    "static_folder": app.static_folder,
+                    "index_exists": os.path.exists(index_path),
+                    "message": "The React frontend build folder was not found. Please check build.sh ran successfully."
+                }), 404
+    except Exception as e:
+        return jsonify({"error": str(e), "static_folder": app.static_folder}), 500
 ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg'}
 
 def allowed_file(filename):
