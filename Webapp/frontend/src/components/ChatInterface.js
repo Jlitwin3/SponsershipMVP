@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { jsPDF } from 'jspdf';
 import './ChatInterface.css';
 
@@ -168,12 +169,9 @@ const ChatInterface = () => {
                 <div className="message-avatar">User</div>
               )}
               <div className="message-text">
-                {message.content.split('\n').map((line, i) => (
-                  <span key={i}>
-                    {line}
-                    {i < message.content.split('\n').length - 1 && <br />}
-                  </span>
-                ))}
+                <ReactMarkdown className="markdown-content">
+                  {message.content}
+                </ReactMarkdown>
               </div>
             </div>
             <div className="message-timestamp">
