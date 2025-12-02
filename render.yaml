@@ -4,11 +4,11 @@ services:
     env: python
     plan: free
     buildCommand: "bash build.sh"
-    startCommand: "gunicorn Project.Parse.databaseAccess:app"
-    #disk:
-    #  name: chroma-data
-    #  mountPath: /var/lib/chroma
-    #  sizeGB: 1
+    startCommand: "gunicorn --timeout 120 Project.Parse.databaseAccess:app"
+    disk:
+      name: chroma-data
+      mountPath: /var/lib/chroma
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0

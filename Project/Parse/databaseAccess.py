@@ -29,7 +29,7 @@ import google.generativeai as genai
 # =========================================
 # 0. Skip Dropbox indexing if no new embeddings
 # =========================================
-SKIP_DROPBOX_INDEXING = True  # Enable to skip indexing PDFs from Dropbox
+SKIP_DROPBOX_INDEXING = os.getenv("SKIP_DROPBOX_INDEXING", "True").lower() == "true"  # Default to True to prevent auto-indexing on startup
 # =========================================
 # 1. Load environment variables
 # =========================================
@@ -468,17 +468,24 @@ def chat():
         🔍 Research Protocol
         1. **Check Provided Context First**: Review any context from the internal database (PDFs, images) for relevant information.
         
-        2. **Use Google Search for Current Information**: When users ask for "current", "latest", "recent", or real-time information (like current sponsors, recent news, today's data), you MUST use the Google Search tool to find up-to-date information. This is especially important for:
-           - Current sponsor lists
-           - Recent partnerships or deals
-           - Latest news or announcements
-           - Time-sensitive information
+        2. **MANDATORY: Use Google Search When Information is Incomplete**: 
+           - If the provided context doesn't fully answer the question, you MUST use Google Search
+           - ALWAYS use Google Search for queries containing: "current", "latest", "recent", "all", "complete list", "comprehensive"
+           - When a user asks for "more", "complete", "whole list", or "all" - this means you MUST search Google to provide additional information
+           - Do NOT say "I don't have" or "I cannot provide" - instead, USE GOOGLE SEARCH to find the answer
         
-        3. **Silent Fallback to Internal Knowledge**: If the provided context doesn't contain the answer AND it's not time-sensitive information, use your internal training data to answer the question. Do NOT state "the provided documents do not contain this" or "I cannot find this in the database". Just answer the question directly and confidently using your general knowledge.
+        3. **NEVER Cite Sources Unless Explicitly Asked**: 
+           - Do NOT use [cite: ...] tags in your responses
+           - Do NOT mention document names, PDFs, or where information came from
+           - Do NOT say "according to" or "based on" unless the user specifically asks "what are your sources?"
+           - Just provide the information naturally as if you know it
         
-        4. **Be Confident**: Answer questions directly. If you know information about sponsors (like Nike's relationship with UO), share it as if it were a known fact, without disclaimers about where the information came from.
-        
-        5. **Cite When Possible**: If information comes from the provided PDFs, cite them. If it comes from Google Search, mention it came from recent search results. If it comes from your knowledge, simply state the facts.
+        4. **Answer Confidently Without Disclaimers**: 
+           - NEVER say: "I don't have a comprehensive list"
+           - NEVER say: "The provided documents do not contain this"
+           - NEVER say: "I cannot find this in the database"
+           - Instead: Use Google Search to find the answer and present it confidently
+
 
         📝 Constraints and Guidelines
         Filter Irrelevant Content: Ignore general news or marketing material. Focus strictly on corporate giving, philanthropy, and sponsorship programs.
@@ -675,7 +682,16 @@ def get_sponsor_details(sponsor_name):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
+@app.route("/api/admin/reindex", methods=["POST"])
+def trigger_reindex():
+    """Manually trigger Dropbox re-indexing."""
+    if processing_status.get("is_processing"):
+        return jsonify({"message": "Indexing already in progress"}), 409
+    
+    thread = threading.Thread(target=index_pdfs_if_new)
+    thread.daemon = True
+    thread.start()
+    return jsonify({"message": "Started background indexing process"})
 # =========================================
 # 10. Startup
 # =========================================
