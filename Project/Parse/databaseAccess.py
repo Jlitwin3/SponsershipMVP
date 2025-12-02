@@ -193,7 +193,8 @@ def chunk_text(text, size=500):
 # =========================================
 openrouter_embed = embedding_functions.OpenAIEmbeddingFunction(
     api_key=API_KEY,
-    model_name="text-embedding-3-large"
+    model_name="text-embedding-3-large",
+    api_base="https://openrouter.ai/api/v1"
 )
 
 # =========================================
