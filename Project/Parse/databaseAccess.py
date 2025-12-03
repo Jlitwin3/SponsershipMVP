@@ -688,6 +688,44 @@ def trigger_reindex():
     thread.daemon = True
     thread.start()
     return jsonify({"message": "Started background indexing process"})
+
+@app.route("/api/admin/reset_db", methods=["POST"])
+def reset_db():
+    """Delete existing collections and start fresh. Use this if embedding dimensions are mismatched."""
+    try:
+        try:
+            client.delete_collection("pdf_embeddings")
+            print("🗑️ Deleted pdf_embeddings collection")
+        except:
+            pass
+            
+        try:
+            client.delete_collection("image_embeddings")
+            print("🗑️ Deleted image_embeddings collection")
+        except:
+            pass
+            
+        # Re-create collections with correct embedding function
+        global collection, image_collection
+        collection = client.create_collection(
+            name="pdf_embeddings",
+            embedding_function=openrouter_embed,
+            metadata={"description": "PDF research papers"}
+        )
+        
+        image_collection = client.create_collection(
+            name="image_embeddings",
+            embedding_function=openrouter_embed
+        )
+        
+        # Trigger re-indexing
+        thread = threading.Thread(target=index_pdfs_if_new)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({"message": "Database reset and re-indexing started"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # =========================================
 # 10. Serve Frontend (Catch-All)
 # =========================================
