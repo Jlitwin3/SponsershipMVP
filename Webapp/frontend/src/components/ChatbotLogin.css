@@ -63,11 +63,36 @@
   line-height: 1.6;
 }
 
-/* Google Login Wrapper */
-.google-login-wrapper {
+/* Microsoft Login Button */
+.microsoft-login-btn {
+  width: 100%;
+  padding: 0.875rem 1.5rem;
+  background: white;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 0.75rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   margin-bottom: 1.5rem;
+}
+
+.microsoft-login-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+.microsoft-icon {
+  width: 24px;
+  height: 24px;
 }
 
 /* Loading State */

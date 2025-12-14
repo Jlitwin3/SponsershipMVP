@@ -86,8 +86,8 @@
   text-align: center;
 }
 
-/* Google Login Button */
-.google-login-btn {
+/* Microsoft Login Button */
+.microsoft-login-btn {
   width: 100%;
   padding: 0.875rem 1.5rem;
   background: white;
@@ -103,16 +103,17 @@
   gap: 0.75rem;
   transition: all 0.2s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  margin-bottom: 1rem;
 }
 
-.google-login-btn:hover {
+.microsoft-login-btn:hover {
   background: #f8fafc;
   border-color: #cbd5e1;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   transform: translateY(-1px);
 }
 
-.google-icon {
+.microsoft-icon {
   width: 24px;
   height: 24px;
 }

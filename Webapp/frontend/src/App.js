@@ -1,9 +1,26 @@
 import React, { useState, useEffect } from 'react';
+import { MsalProvider } from '@azure/msal-react';
+import { PublicClientApplication } from '@azure/msal-browser';
 import './App.css';
 import ChatInterface from './components/ChatInterface';
 import AdminDashboard from './components/AdminDashboard';
 import AdminLogin from './components/AdminLogin';
 import ChatbotLogin from './components/ChatbotLogin';
+
+// MSAL configuration
+const msalConfig = {
+  auth: {
+    clientId: process.env.REACT_APP_MICROSOFT_CLIENT_ID || '',
+    authority: `https://login.microsoftonline.com/${process.env.REACT_APP_MICROSOFT_TENANT_ID || 'common'}`,
+    redirectUri: window.location.origin,
+  },
+  cache: {
+    cacheLocation: 'localStorage',
+    storeAuthStateInCookie: false,
+  }
+};
+
+const msalInstance = new PublicClientApplication(msalConfig);
 
 function App() {
   const [isReady, setIsReady] = useState(false);
@@ -158,4 +175,11 @@ function App() {
   );
 }
 
-export default App;
+// Wrap App with MsalProvider
+const AppWithMsal = () => (
+  <MsalProvider instance={msalInstance}>
+    <App />
+  </MsalProvider>
+);
+
+export default AppWithMsal;
