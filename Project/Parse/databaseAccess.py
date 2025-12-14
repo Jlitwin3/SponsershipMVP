@@ -15,12 +15,19 @@ from werkzeug.utils import secure_filename
 import shutil
 import sys
 import tempfile
+from datetime import datetime
+import json
 
 # =========================================
 # 1. Load environment variables (MUST BE FIRST)
 # =========================================
 env_path = os.path.join(os.path.dirname(__file__), ".env")
+print(f"DEBUG: Loading .env from {env_path}")
 load_dotenv(env_path)
+# Fallback: try loading from CWD if specific path fails
+if not os.getenv("RAPIDAPI_KEY"):
+    print("DEBUG: RAPIDAPI_KEY not found after first load. Trying default load_dotenv().")
+    load_dotenv()
 if not env_path:
     raise ValueError("no env path")
 
@@ -34,6 +41,7 @@ from sponsorship.sponsor_manager import (
     format_sponsor_context
 )
 from sponsorship.query_classifier import QueryClassifier
+from linkedin_service import LinkedInService
 
 from google import genai
 from google.genai import types
@@ -41,12 +49,43 @@ from google.genai import types
 # Initialize Gemini Client Globally
 if os.getenv("GOOGLE_API_KEY"):
     gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    
+    # Define the LinkedIn Tool
+    def fetch_linkedin_updates_tool(company_url: str):
+        """Fetches recent LinkedIn posts/updates for a given company URL."""
+        print(f"DEBUG: Fetching LinkedIn updates for {company_url}")
+        # Re-initialize service to ensure fresh env vars if needed
+        service = LinkedInService(provider="rapidapi")
+        if not service.api_key:
+             print("DEBUG: RAPIDAPI_KEY is missing in service!")
+        return service.get_company_updates(company_url)
+
+    linkedin_tool = types.Tool(
+        function_declarations=[
+            types.FunctionDeclaration(
+                name="fetch_linkedin_updates",
+                description="Fetches recent LinkedIn posts and updates for a specific company or school URL.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "company_url": types.Schema(
+                            type=types.Type.STRING,
+                            description="The full LinkedIn URL of the company or school (e.g., https://www.linkedin.com/school/university-of-oregon/)"
+                        )
+                    },
+                    required=["company_url"]
+                )
+            )
+        ]
+    )
+    
     grounding_tool = types.Tool(
         google_search=types.GoogleSearch()
     )
 else:
     gemini_client = None
     grounding_tool = None
+    linkedin_tool = None
 # =========================================
 # 0. Skip Dropbox indexing if no new embeddings
 # =========================================
@@ -149,6 +188,9 @@ temp_documents = {
 
 # Initialize query classifier
 query_classifier = QueryClassifier()
+
+# Initialize LinkedIn Service
+linkedin_service = LinkedInService(provider="rapidapi")
 
 # =========================================
 # 5. Helper Functions
@@ -552,8 +594,23 @@ def chat():
         if not gemini_client:
              return jsonify({"error": "Gemini API key not configured"}), 500
 
+        # Smart Tool Selection
+        # Gemini cannot handle both Google Search and Function Calling in the same request (currently).
+        # So we dynamically choose which tool to enable based on the user's query.
+        
+        query_lower = user_query.lower()
+        linkedin_keywords = ["linkedin", "post", "posts", "update", "updates", "social media"]
+        
+        if any(keyword in query_lower for keyword in linkedin_keywords):
+            print("DEBUG: LinkedIn keywords detected. Enabling LinkedIn Tool.")
+            selected_tools = [linkedin_tool]
+        else:
+            print("DEBUG: Standard query. Enabling Google Search (Grounding).")
+            selected_tools = [grounding_tool]
+
         config = types.GenerateContentConfig(
-            tools=[grounding_tool]
+            tools=selected_tools,
+            temperature=0.7
         )
         
         # Construct the full prompt from messages
@@ -568,11 +625,48 @@ def chat():
 
         print("DEBUG: Sending request to Gemini...")
         try:
+            # Pass 1: Initial generation
             response = gemini_client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=full_prompt,
                 config=config
             )
+            
+            # Check for function call
+            if response.function_calls:
+                for fc in response.function_calls:
+                    if fc.name == "fetch_linkedin_updates":
+                        company_url = fc.args["company_url"]
+                        print(f"🤖 Gemini requested LinkedIn updates for: {company_url}")
+                        
+                        # Execute the tool
+                        # We call the tool function we defined above, which handles init
+                        updates = fetch_linkedin_updates_tool(company_url)
+                        
+                        # Format the output
+                        tool_output = json.dumps(updates) if updates else "No updates found."
+                        
+                        # Pass 2: Send tool output back to Gemini
+                        print("DEBUG: Sending tool output back to Gemini...")
+                        
+                        # We need to construct a new turn with the function response
+                        # Note: The Python SDK handles history differently, but for single-turn + context approach:
+                        
+                        response = gemini_client.models.generate_content(
+                            model="gemini-2.0-flash",
+                            contents=[
+                                types.Content(role="user", parts=[types.Part(text=full_prompt)]),
+                                response.candidates[0].content, # The model's function call
+                                types.Content(role="user", parts=[
+                                    types.Part(function_response=types.FunctionResponse(
+                                        name="fetch_linkedin_updates",
+                                        response={"result": tool_output}
+                                    ))
+                                ])
+                            ],
+                            config=config
+                        )
+
             print("DEBUG: Gemini response received.")
         except Exception as e:
             print(f"ERROR: Gemini generation failed: {e}")
@@ -801,6 +895,61 @@ def delete_file():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/admin/sync-linkedin", methods=["POST"])
+def sync_linkedin():
+    """
+    Trigger a sync of LinkedIn data for the University of Oregon.
+    """
+    try:
+        # Default to UO for this MVP, but could be parameterized
+        company_url = "https://www.linkedin.com/school/university-of-oregon/"
+        
+        print(f"🔄 Starting LinkedIn sync for {company_url}...")
+        updates = linkedin_service.get_company_updates(company_url)
+        
+        if not updates:
+            return jsonify({"message": "No updates found or API error", "count": 0})
+            
+        # Index the updates into ChromaDB
+        ids = []
+        documents = []
+        metadatas = []
+        
+        for i, update in enumerate(updates):
+            # Create a unique ID for the chunk
+            chunk_id = f"linkedin_{datetime.now().strftime('%Y%m%d')}_{i}"
+            
+            ids.append(chunk_id)
+            documents.append(update['content'])
+            metadatas.append({
+                "source": "LinkedIn Sync",
+                "type": "social_media",
+                "url": company_url,
+                "date": update['date'],
+                "upload_type": "auto_sync"
+            })
+            
+        if ids:
+            collection.add(
+                ids=ids,
+                documents=documents,
+                metadatas=metadatas
+            )
+            print(f"✅ Indexed {len(ids)} LinkedIn updates")
+            
+        return jsonify({
+            "message": f"Successfully synced {len(ids)} updates from LinkedIn",
+            "count": len(ids),
+            "updates": updates
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/sponsors/<sponsor_name>", methods=["GET"])
 def get_sponsor_details(sponsor_name):
