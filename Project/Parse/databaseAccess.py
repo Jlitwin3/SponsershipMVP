@@ -18,6 +18,10 @@ import json
 # Fix for HuggingFace tokenizers warning/deadlock on Render
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+print("="*50)
+print("🚀 INITIALIZING APPLICATION")
+print("="*50)
+
 # =========================================
 # 1. Load environment variables (MUST BE FIRST)
 # =========================================
@@ -47,9 +51,57 @@ from dropbox_indexer import index_pdfs_if_new, chunk_text
 from google import genai
 from google.genai import types
 
-# Initialize Gemini Client Globally
+# =========================================
+# 2. ChromaDB Setup (Persistent)
+# =========================================
+print("📚 Loading ChromaDB...")
+# Use absolute path for external storage (hidden folder in user's home dir)
+# Use environment variable for ChromaDB path (Render Persistent Disk) or default to local
+CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.expanduser("~/.chroma_db_data"))
+if not os.path.exists(CHROMA_DB_PATH):
+    os.makedirs(CHROMA_DB_PATH)
+
+client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+
+# Try to get existing collection first, create if it doesn't exist
+try:
+    collection = client.get_or_create_collection(name="pdf_embeddings", metadata={"description": "PDF research papers"})
+    print(f"✅ PDF collection found. Current count: {collection.count()}")
+except Exception as e:
+    print(f"❌ Failed to load PDF collection: {e}")
+    raise e
+
+# Get image collection (if it exists)
+try:
+    image_collection = client.get_collection("image_embeddings")
+    print(f"✅ Image collection found with {image_collection.count()} embeddings")
+except:
+    image_collection = None
+    print("⚠️  No image collection found - only PDFs will be searched")
+
+
+# =========================================
+# 3. Warmup ChromaDB
+# =========================================
+print("🔥 Preloading embedding model (60s timeout)...")
+import time
+start = time.time()
+try:
+    if collection.count() > 0:
+        collection.query(query_texts=["initialization warmup query"], n_results=1)
+    elapsed = time.time() - start
+    print(f"✅ ChromaDB ready in {elapsed:.1f}s")
+except Exception as e:
+    print(f"⚠️ Warmup failed: {e}")
+
+
+# =========================================
+# 4. Initialize Gemini
+# =========================================
+print("🤖 Initializing Gemini...")
 if os.getenv("GOOGLE_API_KEY"):
     gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    print("✅ Gemini ready!")
     
     # Define the LinkedIn Tool
     def fetch_linkedin_updates_tool(company_url: str):
@@ -87,88 +139,32 @@ else:
     gemini_client = None
     grounding_tool = None
     linkedin_tool = None
-# =========================================
-# 0. Skip Dropbox indexing if no new embeddings
-# -- all files in db were originally in dropbox so this is to skip the indexing.
-# =========================================
-SKIP_DROPBOX_INDEXING = os.getenv("SKIP_DROPBOX_INDEXING", "True").lower() == "true"  # Default to True to prevent auto-indexing on startup
+    print("⚠️  Warning: GOOGLE_API_KEY not found - Gemini disabled")
 
 
+# =========================================
+# 5. Other Setup
+# =========================================
+SKIP_DROPBOX_INDEXING = os.getenv("SKIP_DROPBOX_INDEXING", "True").lower() == "true"
 DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_ACCESS_TOKEN")
 API_KEY = os.getenv("OPENROUTER_API_KEY")
 SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
 SITE_TITLE = os.getenv("OPENROUTER_SITE_TITLE", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-
-
 if not DROPBOX_ACCESS_TOKEN:
     raise ValueError("Missing required DropBox access token in .env")
 if not API_KEY:
     raise ValueError("Missing required OpenRouter API key in .env")
-if not GOOGLE_API_KEY:
-    print("⚠️  Warning: GOOGLE_API_KEY not found in .env - Gemini search will be disabled")
 
 chat_history = []
-# =========================================
-# 2. Dropbox Setup (Moved to dropbox_indexer.py)
-# =========================================
-# dbx and DROPBOX_FOLDER are now handled in dropbox_indexer.py
+
+print("="*50)
+print("✅ APPLICATION FULLY INITIALIZED")
+print("="*50)
 
 # =========================================
-# 3. ChromaDB Setup (Persistent)
-# =========================================
-# Use absolute path for external storage (hidden folder in user's home dir)
-# Use environment variable for ChromaDB path (Render Persistent Disk) or default to local
-CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.expanduser("~/.chroma_db_data"))
-if not os.path.exists(CHROMA_DB_PATH):
-    os.makedirs(CHROMA_DB_PATH)
-
-client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-
-# Try to get existing collection first, create if it doesn't exist
-try:
-    collection = client.get_collection("pdf_embeddings")
-    print(f"✅ PDF collection found. Current count: {collection.count()}")
-except:
-    # Collection doesn't exist, create it
-    collection = client.create_collection(
-        name="pdf_embeddings",
-        metadata={"description": "PDF research papers"}
-    )
-    print(f"✅ Created new PDF collection")
-
-# Get image collection (if it exists)
-try:
-    image_collection = client.get_collection("image_embeddings")
-    print(f"✅ Image collection found with {image_collection.count()} embeddings")
-except:
-    image_collection = None
-    print("⚠️  No image collection found - only PDFs will be searched")
-
-
-# =========================================
-# 4. Warmup ChromaDB
-# =========================================
-
-def warmup_chromadb():
-    """Pre-download embedding model to avoid timeout on first query"""
-    try:
-        print("🔥 Warming up ChromaDB embedding model...")
-        # This will trigger model download if not cached
-        collection.query(
-            query_texts=["warmup query"],
-            n_results=1
-        )
-        print("✅ ChromaDB model ready!")
-    except Exception as e:
-        print(f"⚠️ Warmup failed (will retry on first query): {e}")
-
-# Call it after collection is created
-if SKIP_DROPBOX_INDEXING:
-    warmup_chromadb()
-# =========================================
-# 5. Flask Setup
+# 6. Flask Setup
 # =========================================
 # Point to the React build folder (absolute path for Render compatibility)
 BUILD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Webapp', 'frontend', 'build')
