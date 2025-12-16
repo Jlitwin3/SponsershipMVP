@@ -39,7 +39,7 @@ Go to the **Environment** tab in Render and add:
 *   `TOKENIZERS_PARALLELISM`: `false`
 *   `GOOGLE_API_KEY`: [Your Key]
 *   `DROPBOX_ACCESS_TOKEN`: [Your Key]
-*   `RAPIDAPI_KEY`: [Your Key]
+*   `RAPIDAPI_KEY`: [Your Key] -- the linkedin api is called "Fresh LinkedIn Profile Data" on rapidAPI
 *   `SKIP_DROPBOX_INDEXING`: `False` (Set to `True` if you don't want to re-scan Dropbox on every restart)
 
 ## 4. Persistent Storage (Optional but Recommended)
@@ -52,4 +52,4 @@ To keep your PDF index from disappearing on every restart:
 
 ## 5. Troubleshooting
 *   **Timeout Errors**: We increased the timeout to 300s (5 mins) to allow the AI model to load.
-*   **Worker Killed**: If you see "Worker was sent SIGKILL", it usually means the free tier memory (512MB) was exceeded. Upgrade to the Starter plan ($7/mo) for 2GB RAM.
+*   **Worker Killed**: If you see "Worker was sent SIGKILL", it usually means the free tier memory (512MB) was exceeded. Upgrade to the Starter plan ($9/mo) for 2GB RAM.

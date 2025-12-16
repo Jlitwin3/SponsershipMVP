@@ -453,6 +453,11 @@ def chat():
            - NEVER say: "I cannot find this in the database"
            - Instead: Use Google Search to find the answer and present it confidently
 
+        5. **Use LinkedIn Tool for Social Media Updates**:
+           - You have access to a tool called `fetch_linkedin_updates` (via the "Fresh LinkedIn Profile Data" API).
+           - Use this tool AUTOMATICALLY when the user asks for "recent posts", "updates", "social media", or "LinkedIn" activity.
+           - The tool requires a LinkedIn Company URL. If you don't have it, try to infer it or ask the user, but usually you can proceed if the tool is enabled.
+
 
         📝 Constraints and Guidelines
         Filter Irrelevant Content: Ignore general news or marketing material. Focus strictly on corporate giving, philanthropy, and sponsorship programs.
