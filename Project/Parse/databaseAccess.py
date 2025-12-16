@@ -15,6 +15,9 @@ import tempfile
 from datetime import datetime
 import json
 
+# Fix for HuggingFace tokenizers warning/deadlock on Render
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # =========================================
 # 1. Load environment variables (MUST BE FIRST)
 # =========================================
@@ -258,7 +261,14 @@ def extract_sponsor_mentions(query: str) -> list:
 # =========================================
 @app.route("/api/chat", methods=["POST"])
 def chat():
+    import time
+    timings = {}
+    start = time.time()
+
     data = request.json
+    timings['receive'] = time.time() - start
+    print(f"📨 [{time.time()-start:.1f}s] Received chat request")
+
     if not data or "query" not in data:
         return jsonify({"error": "No query provided"}), 400
 
@@ -270,7 +280,8 @@ def chat():
     try:
         # ===== Step 1: Classify the query =====
         classification = query_classifier.classify(user_query)
-        print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})")
+        timings['classification'] = time.time() - start
+        print(f"📊 [{time.time()-start:.1f}s] Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})")
 
         # Check if query is off-topic
         """
@@ -310,6 +321,9 @@ def chat():
                         sponsor_context += f"Current Partner: {conflict_info['existing_sponsor']} ({conflict_info['category']})\n"
                     sponsor_context += "\n"
                     print(f"⚠️  Sponsor conflict detected: {sponsor_name}")
+        
+        timings['sponsor_detection'] = time.time() - start
+        print(f"⏱️ [{time.time()-start:.1f}s] Sponsor detection complete")
 
         # ===== Step 3: Query vector databases (adjust based on classification) =====
         # Adjust retrieval based on query type
@@ -328,7 +342,10 @@ def chat():
             pdf_count = 5
             image_count = 3
 
+        print(f"⏱️ [{time.time()-start:.1f}s] Querying ChromaDB...")
         pdf_results = collection.query(query_texts=[user_query], n_results=pdf_count)
+        timings['chromadb'] = time.time() - start
+        print(f"✅ [{time.time()-start:.1f}s] ChromaDB query complete")
 
         # Initialize combined results
         all_documents = []
@@ -525,7 +542,7 @@ def chat():
             
         full_prompt += f"\nContext:\n{context}\n\nUser Question: {user_query}"
 
-        print("DEBUG: Sending request to Gemini...")
+        print(f"DEBUG: Sending request to Gemini... (Time: {time.time()-start:.1f}s)")
         try:
             # Pass 1: Initial generation
             response = gemini_client.models.generate_content(
@@ -533,6 +550,8 @@ def chat():
                 contents=full_prompt,
                 config=config
             )
+            timings['gemini'] = time.time() - start
+            print(f"✅ [{time.time()-start:.1f}s] Gemini response received")
             
             # Check for function call
             if response.function_calls:
@@ -581,6 +600,7 @@ def chat():
 
     except Exception as e:
         import traceback
+        print(f"❌ [{time.time()-start:.1f}s] ERROR: {str(e)}")
         print(f"Full error traceback: ")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
