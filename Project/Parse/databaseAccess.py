@@ -1,5 +1,8 @@
 import os
+import fitz
 import numpy as np
+from io import BytesIO
+import dropbox
 import chromadb
 from chromadb.utils import embedding_functions
 from flask import Flask, request, jsonify
@@ -12,26 +15,12 @@ from werkzeug.utils import secure_filename
 import shutil
 import sys
 import tempfile
-from datetime import datetime
-import json
-
-# Fix for HuggingFace tokenizers warning/deadlock on Render
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-print("="*50)
-print("🚀 INITIALIZING APPLICATION")
-print("="*50)
 
 # =========================================
 # 1. Load environment variables (MUST BE FIRST)
 # =========================================
 env_path = os.path.join(os.path.dirname(__file__), ".env")
-print(f"DEBUG: Loading .env from {env_path}")
 load_dotenv(env_path)
-# Fallback: try loading from CWD if specific path fails
-if not os.getenv("RAPIDAPI_KEY"):
-    print("DEBUG: RAPIDAPI_KEY not found after first load. Trying default load_dotenv().")
-    load_dotenv()
 if not env_path:
     raise ValueError("no env path")
 
@@ -45,16 +34,49 @@ from sponsorship.sponsor_manager import (
     format_sponsor_context
 )
 from sponsorship.query_classifier import QueryClassifier
-from linkedin_service import LinkedInService
-from dropbox_indexer import index_pdfs_if_new, chunk_text
 
 from google import genai
 from google.genai import types
 
+# Initialize Gemini Client Globally
+if os.getenv("GOOGLE_API_KEY"):
+    gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    grounding_tool = types.Tool(
+        google_search=types.GoogleSearch()
+    )
+else:
+    gemini_client = None
+    grounding_tool = None
 # =========================================
-# 2. ChromaDB Setup (Persistent)
+# 0. Skip Dropbox indexing if no new embeddings
 # =========================================
-print("📚 Loading ChromaDB...")
+SKIP_DROPBOX_INDEXING = os.getenv("SKIP_DROPBOX_INDEXING", "True").lower() == "true"  # Default to True to prevent auto-indexing on startup
+
+DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_ACCESS_TOKEN")
+API_KEY = os.getenv("OPENROUTER_API_KEY")
+SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
+SITE_TITLE = os.getenv("OPENROUTER_SITE_TITLE", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+
+
+if not DROPBOX_ACCESS_TOKEN:
+    raise ValueError("Missing required DropBox access token in .env")
+if not API_KEY:
+    raise ValueError("Missing required OpenRouter API key in .env")
+if not GOOGLE_API_KEY:
+    print("⚠️  Warning: GOOGLE_API_KEY not found in .env - Gemini search will be disabled")
+
+chat_history = []
+# =========================================
+# 2. Dropbox Setup
+# =========================================
+dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+DROPBOX_FOLDER = "/L’mu-Oa (Sports Sponsorship AI Project)"  # Dropbox folder path
+
+# =========================================
+# 3. ChromaDB Setup (Persistent)
+# =========================================
 # Use absolute path for external storage (hidden folder in user's home dir)
 # Use environment variable for ChromaDB path (Render Persistent Disk) or default to local
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.expanduser("~/.chroma_db_data"))
@@ -65,11 +87,15 @@ client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
 # Try to get existing collection first, create if it doesn't exist
 try:
-    collection = client.get_or_create_collection(name="pdf_embeddings", metadata={"description": "PDF research papers"})
+    collection = client.get_collection("pdf_embeddings")
     print(f"✅ PDF collection found. Current count: {collection.count()}")
-except Exception as e:
-    print(f"❌ Failed to load PDF collection: {e}")
-    raise e
+except:
+    # Collection doesn't exist, create it
+    collection = client.create_collection(
+        name="pdf_embeddings",
+        metadata={"description": "PDF research papers"}
+    )
+    print(f"✅ Created new PDF collection")
 
 # Get image collection (if it exists)
 try:
@@ -79,92 +105,8 @@ except:
     image_collection = None
     print("⚠️  No image collection found - only PDFs will be searched")
 
-
 # =========================================
-# 3. Warmup ChromaDB
-# =========================================
-print("🔥 Preloading embedding model (60s timeout)...")
-import time
-start = time.time()
-try:
-    if collection.count() > 0:
-        collection.query(query_texts=["initialization warmup query"], n_results=1)
-    elapsed = time.time() - start
-    print(f"✅ ChromaDB ready in {elapsed:.1f}s")
-except Exception as e:
-    print(f"⚠️ Warmup failed: {e}")
-
-
-# =========================================
-# 4. Initialize Gemini
-# =========================================
-print("🤖 Initializing Gemini...")
-if os.getenv("GOOGLE_API_KEY"):
-    gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-    print("✅ Gemini ready!")
-    
-    # Define the LinkedIn Tool
-    def fetch_linkedin_updates_tool(company_url: str):
-        """Fetches recent LinkedIn posts/updates for a given company URL."""
-        print(f"DEBUG: Fetching LinkedIn updates for {company_url}")
-        # Re-initialize service to ensure fresh env vars if needed
-        service = LinkedInService(provider="rapidapi")
-        if not service.api_key:
-             print("DEBUG: RAPIDAPI_KEY is missing in service!")
-        return service.get_company_updates(company_url)
-
-    linkedin_tool = types.Tool(
-        function_declarations=[
-            types.FunctionDeclaration(
-                name="fetch_linkedin_updates",
-                description="Fetches recent LinkedIn posts and updates for a specific company or school URL.",
-                parameters=types.Schema(
-                    type=types.Type.OBJECT,
-                    properties={
-                        "company_url": types.Schema(
-                            type=types.Type.STRING,
-                            description="The full LinkedIn URL of the company or school (e.g., https://www.linkedin.com/school/university-of-oregon/)"
-                        )
-                    },
-                    required=["company_url"]
-                )
-            )
-        ]
-    )
-    
-    grounding_tool = types.Tool(
-        google_search=types.GoogleSearch()
-    )
-else:
-    gemini_client = None
-    grounding_tool = None
-    linkedin_tool = None
-    print("⚠️  Warning: GOOGLE_API_KEY not found - Gemini disabled")
-
-
-# =========================================
-# 5. Other Setup
-# =========================================
-SKIP_DROPBOX_INDEXING = os.getenv("SKIP_DROPBOX_INDEXING", "True").lower() == "true"
-DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_ACCESS_TOKEN")
-API_KEY = os.getenv("OPENROUTER_API_KEY")
-SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
-SITE_TITLE = os.getenv("OPENROUTER_SITE_TITLE", "")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-if not DROPBOX_ACCESS_TOKEN:
-    raise ValueError("Missing required DropBox access token in .env")
-if not API_KEY:
-    raise ValueError("Missing required OpenRouter API key in .env")
-
-chat_history = []
-
-print("="*50)
-print("✅ APPLICATION FULLY INITIALIZED")
-print("="*50)
-
-# =========================================
-# 6. Flask Setup
+# 4. Flask Setup
 # =========================================
 # Point to the React build folder (absolute path for Render compatibility)
 BUILD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Webapp', 'frontend', 'build')
@@ -208,22 +150,137 @@ temp_documents = {
 # Initialize query classifier
 query_classifier = QueryClassifier()
 
-# Initialize LinkedIn Service
-linkedin_service = LinkedInService(provider="rapidapi")
+# =========================================
+# 5. Helper Functions
+# =========================================
+def fetch_dropbox_pdfs(folder_path=DROPBOX_FOLDER):
+    """Get list of PDFs in Dropbox folder (recursively, including subfolders)."""
+    print(f" Scanning Dropbox folder: {folder_path}")
+
+    pdf_files = []
+
+    try:
+        result = dbx.files_list_folder(folder_path, recursive=True)
+    except dropbox.exceptions.ApiError as e:
+        print("Dropbox API error:", e)
+        return pdf_files
+
+    # Process first batch
+    for entry in result.entries:
+        if isinstance(entry, dropbox.files.FileMetadata) and entry.name.lower().endswith(".pdf"):
+            pdf_files.append(entry)
+
+    # Continue paging if there are more results
+    while result.has_more:
+        result = dbx.files_list_folder_continue(result.cursor)
+        for entry in result.entries:
+            if isinstance(entry, dropbox.files.FileMetadata) and entry.name.lower().endswith(".pdf"):
+                pdf_files.append(entry)
+
+    print(f" Found {len(pdf_files)} PDF(s).")
+    return pdf_files
+
+
+
+def extract_text_from_pdf(file_metadata):
+    """Download and extract text from a Dropbox PDF"""
+    _, res = dbx.files_download(file_metadata.path_lower)
+    pdf_bytes = BytesIO(res.content)
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        text = "".join(page.get_text() for page in doc)
+    return text
+
+
+def chunk_text(text, size=500):
+    """Split text into smaller chunks"""
+    return [text[i:i+size] for i in range(0, len(text), size)]
+
 
 # =========================================
-# 6. Start Indexing in Background
+# 6. Embedding Function
 # =========================================
-if not SKIP_DROPBOX_INDEXING:
-    threading.Thread(target=index_pdfs_if_new, args=(collection, processing_status)).start()
-else:
-    print("⏭️ Skipping Dropbox indexing (SKIP_DROPBOX_INDEXING=True)")
-
-# fetch_dropbox_pdfs, extract_text_from_pdf, chunk_text, get_all_ids, index_pdfs_if_new 
-# are now imported from dropbox_indexer.py
+openrouter_embed = embedding_functions.OpenAIEmbeddingFunction(
+    api_key=API_KEY,
+    model_name="text-embedding-3-large",
+    api_base="https://openrouter.ai/api/v1"
+)
 
 # =========================================
-# 7. Helper Functions for Sponsor Detection
+# 7. Index PDFs Once
+# =========================================
+def get_all_ids(collection):
+    """Fetch all existing document IDs from ChromaDB."""
+    all_ids = []
+    offset = 0
+    batch_size = 100
+    while True:
+        result = collection.get(limit=batch_size, offset=offset)
+        if not result["ids"]:
+            break
+        all_ids.extend(result["ids"])
+        offset += batch_size
+    return set(all_ids)
+
+
+def index_pdfs_if_new():
+    """Index only new or modified PDFs."""
+    processing_status["is_processing"] = True
+    pdf_files = fetch_dropbox_pdfs()
+
+    # ✅ Correctly fetch existing IDs
+    existing_ids = get_all_ids(collection)
+    print("length of ids: ", len(existing_ids))
+    skipped = 0
+    for file_metadata in pdf_files:
+        pdf_id = file_metadata.id or file_metadata.name
+
+        # ✅ Check if this file (by name) already exists in DB
+        existing = collection.get(where={"source": file_metadata.name})
+        if existing["metadatas"]:
+            existing_rev = existing["metadatas"][0].get("rev")
+            # Skip if same revision (unchanged file)
+            if existing_rev == file_metadata.rev:
+                print(f"⏭️ Skipping {file_metadata.name} — no changes detected.")
+                continue
+
+        # ✅ Skip if already indexed and no revision check available
+        if pdf_id in existing_ids:
+            print(f"⏭️ Already indexed: {file_metadata.name}")
+            continue
+
+        # Otherwise, process and index
+        print(f"📄 Processing: {file_metadata.name}")
+        try:
+            text = extract_text_from_pdf(file_metadata)
+            chunks = chunk_text(text)
+
+            if not chunks:
+                print(f"⚠️ Skipping {file_metadata.name} — no text extracted.")
+                skipped += 1
+                continue
+
+            base_id = pdf_id if pdf_id else file_metadata.name.replace(" ", "_").replace(".pdf", "")
+            ids = [f"{base_id}_chunk{i}" for i in range(len(chunks))]
+            ids = [i if i else f"{base_id}_chunk{idx}" for idx, i in enumerate(ids)]
+
+            # ✅ Include revision info in metadata
+            collection.add(
+                ids=ids,
+                documents=chunks,
+                metadatas=[{"source": file_metadata.name, "rev": file_metadata.rev}] * len(chunks)
+            )
+
+            print(f"✅ Indexed {len(chunks)} chunks from {file_metadata.name}")
+
+        except Exception as e:
+            print(f"❌ Failed to process {file_metadata.name}: {e}")
+
+    processing_status["is_processing"] = False
+    processing_status["is_ready"] = True
+    print("📚 All Dropbox PDFs processed and stored in ChromaDB!")
+    print(f"Skipped {skipped} files")
+# =========================================
+# 8. Helper Functions for Sponsor Detection
 # =========================================
 def extract_sponsor_mentions(query: str) -> list:
     """
@@ -253,18 +310,11 @@ def extract_sponsor_mentions(query: str) -> list:
     return potential_sponsors
 
 # =========================================
-# 8. Query ChromaDB and Chat
+# 9. Query ChromaDB and Chat via OpenRouter
 # =========================================
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    import time
-    timings = {}
-    start = time.time()
-
     data = request.json
-    timings['receive'] = time.time() - start
-    print(f"📨 [{time.time()-start:.1f}s] Received chat request")
-
     if not data or "query" not in data:
         return jsonify({"error": "No query provided"}), 400
 
@@ -276,8 +326,7 @@ def chat():
     try:
         # ===== Step 1: Classify the query =====
         classification = query_classifier.classify(user_query)
-        timings['classification'] = time.time() - start
-        print(f"📊 [{time.time()-start:.1f}s] Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})")
+        print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})")
 
         # Check if query is off-topic
         """
@@ -317,9 +366,6 @@ def chat():
                         sponsor_context += f"Current Partner: {conflict_info['existing_sponsor']} ({conflict_info['category']})\n"
                     sponsor_context += "\n"
                     print(f"⚠️  Sponsor conflict detected: {sponsor_name}")
-        
-        timings['sponsor_detection'] = time.time() - start
-        print(f"⏱️ [{time.time()-start:.1f}s] Sponsor detection complete")
 
         # ===== Step 3: Query vector databases (adjust based on classification) =====
         # Adjust retrieval based on query type
@@ -338,10 +384,7 @@ def chat():
             pdf_count = 5
             image_count = 3
 
-        print(f"⏱️ [{time.time()-start:.1f}s] Querying ChromaDB...")
         pdf_results = collection.query(query_texts=[user_query], n_results=pdf_count)
-        timings['chromadb'] = time.time() - start
-        print(f"✅ [{time.time()-start:.1f}s] ChromaDB query complete")
 
         # Initialize combined results
         all_documents = []
@@ -364,7 +407,7 @@ def chat():
                 print(f"⚠️  Error querying image collection: {img_err}")
 
         # =========================================
-        # Web Search (Fallback/Augmentation)
+        # 6. Web Search (Fallback/Augmentation)
         # =========================================
         web_results = []
         # Perform search if:
@@ -515,23 +558,8 @@ def chat():
         if not gemini_client:
              return jsonify({"error": "Gemini API key not configured"}), 500
 
-        # Smart Tool Selection
-        # Gemini cannot handle both Google Search and Function Calling in the same request (currently).
-        # So we dynamically choose which tool to enable based on the user's query.
-        
-        query_lower = user_query.lower()
-        linkedin_keywords = ["linkedin", "post", "posts", "update", "updates", "social media"]
-        
-        if any(keyword in query_lower for keyword in linkedin_keywords):
-            print("DEBUG: LinkedIn keywords detected. Enabling LinkedIn Tool.")
-            selected_tools = [linkedin_tool]
-        else:
-            print("DEBUG: Standard query. Enabling Google Search (Grounding).")
-            selected_tools = [grounding_tool]
-
         config = types.GenerateContentConfig(
-            tools=selected_tools,
-            temperature=0.7
+            tools=[grounding_tool]
         )
         
         # Construct the full prompt from messages
@@ -544,52 +572,13 @@ def chat():
             
         full_prompt += f"\nContext:\n{context}\n\nUser Question: {user_query}"
 
-        print(f"DEBUG: Sending request to Gemini... (Time: {time.time()-start:.1f}s)")
+        print("DEBUG: Sending request to Gemini...")
         try:
-            # Pass 1: Initial generation
             response = gemini_client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=full_prompt,
                 config=config
             )
-            timings['gemini'] = time.time() - start
-            print(f"✅ [{time.time()-start:.1f}s] Gemini response received")
-            
-            # Check for function call
-            if response.function_calls:
-                for fc in response.function_calls:
-                    if fc.name == "fetch_linkedin_updates":
-                        company_url = fc.args["company_url"]
-                        print(f"🤖 Gemini requested LinkedIn updates for: {company_url}")
-                        
-                        # Execute the tool
-                        # We call the tool function we defined above, which handles init
-                        updates = fetch_linkedin_updates_tool(company_url)
-                        
-                        # Format the output
-                        tool_output = json.dumps(updates) if updates else "No updates found."
-                        
-                        # Pass 2: Send tool output back to Gemini
-                        print("DEBUG: Sending tool output back to Gemini...")
-                        
-                        # We need to construct a new turn with the function response
-                        # Note: The Python SDK handles history differently, but for single-turn + context approach:
-                        
-                        response = gemini_client.models.generate_content(
-                            model="gemini-2.0-flash",
-                            contents=[
-                                types.Content(role="user", parts=[types.Part(text=full_prompt)]),
-                                response.candidates[0].content, # The model's function call
-                                types.Content(role="user", parts=[
-                                    types.Part(function_response=types.FunctionResponse(
-                                        name="fetch_linkedin_updates",
-                                        response={"result": tool_output}
-                                    ))
-                                ])
-                            ],
-                            config=config
-                        )
-
             print("DEBUG: Gemini response received.")
         except Exception as e:
             print(f"ERROR: Gemini generation failed: {e}")
@@ -602,7 +591,6 @@ def chat():
 
     except Exception as e:
         import traceback
-        print(f"❌ [{time.time()-start:.1f}s] ERROR: {str(e)}")
         print(f"Full error traceback: ")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -634,7 +622,6 @@ def list_sponsors():
         return jsonify({"error": str(e)}), 500
 
 """
-
 @app.route("/api/admin/upload", methods=["POST"])
 def upload_file():
     if 'files' not in request.files:
@@ -821,61 +808,6 @@ def delete_file():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-
-@app.route("/api/admin/sync-linkedin", methods=["POST"])
-def sync_linkedin():
-    """
-    Trigger a sync of LinkedIn data for the University of Oregon.
-    """
-    try:
-        # Default to UO for this MVP, but could be parameterized
-        company_url = "https://www.linkedin.com/school/university-of-oregon/"
-        
-        print(f"🔄 Starting LinkedIn sync for {company_url}...")
-        updates = linkedin_service.get_company_updates(company_url)
-        
-        if not updates:
-            return jsonify({"message": "No updates found or API error", "count": 0})
-            
-        # Index the updates into ChromaDB
-        ids = []
-        documents = []
-        metadatas = []
-        
-        for i, update in enumerate(updates):
-            # Create a unique ID for the chunk
-            chunk_id = f"linkedin_{datetime.now().strftime('%Y%m%d')}_{i}"
-            
-            ids.append(chunk_id)
-            documents.append(update['content'])
-            metadatas.append({
-                "source": "LinkedIn Sync",
-                "type": "social_media",
-                "url": company_url,
-                "date": update['date'],
-                "upload_type": "auto_sync"
-            })
-            
-        if ids:
-            collection.add(
-                ids=ids,
-                documents=documents,
-                metadatas=metadatas
-            )
-            print(f"✅ Indexed {len(ids)} LinkedIn updates")
-            
-        return jsonify({
-            "message": f"Successfully synced {len(ids)} updates from LinkedIn",
-            "count": len(ids),
-            "updates": updates
-        })
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/api/sponsors/<sponsor_name>", methods=["GET"])
 def get_sponsor_details(sponsor_name):
     """Get detailed information about a specific sponsor."""
@@ -941,18 +873,16 @@ def reset_db():
 def verify_email():
     """Verify if an email is whitelisted for admin access."""
     try:
+        from user_db import is_admin
+
         data = request.json
         email = data.get("email", "").strip().lower()
 
         if not email:
             return jsonify({"error": "Email is required", "authorized": False}), 400
 
-        # Get ADMIN list from environment variable
-        admin_str = os.getenv("ADMIN_LIST", "")
-        admin_emails = [e.strip().lower() for e in admin_str.split(",") if e.strip()]
-
-        # Check if email is in admin list
-        is_authorized = email in admin_emails
+        # Check if email is in admin list (from SQLite)
+        is_authorized = is_admin(email)
 
         print(f"🔍 Admin access attempt: {email} - {'✅ Authorized' if is_authorized else '❌ Denied'}")
 
@@ -969,22 +899,16 @@ def verify_email():
 def verify_chatbot_email():
     """Verify if an email is whitelisted for chatbot access (uses USER_WHITELIST)."""
     try:
+        from user_db import is_authorized_for_chatbot
+
         data = request.json
         email = data.get("email", "").strip().lower()
 
         if not email:
             return jsonify({"error": "Email is required", "authorized": False}), 400
 
-        # Get USER whitelist from environment variable
-        user_whitelist_str = os.getenv("USER_WHITELIST", "")
-        whitelisted_emails = [e.strip().lower() for e in user_whitelist_str.split(",") if e.strip()]
-
-        # Also get admin list - admins can access chatbot too
-        admin_str = os.getenv("ADMIN_LIST", "")
-        admin_emails = [e.strip().lower() for e in admin_str.split(",") if e.strip()]
-
-        # Check if email is in either list
-        is_authorized = email in whitelisted_emails or email in admin_emails
+        # Check if email is authorized (admin OR whitelisted user) from SQLite
+        is_authorized = is_authorized_for_chatbot(email)
 
         print(f"🔍 Chatbot access attempt: {email} - {'✅ Authorized' if is_authorized else '❌ Denied'}")
 
@@ -1001,8 +925,9 @@ def verify_chatbot_email():
 def get_whitelist():
     """Get the current user email whitelist."""
     try:
-        whitelist_str = os.getenv("USER_WHITELIST", "")
-        whitelisted_emails = [e.strip() for e in whitelist_str.split(",") if e.strip()]
+        from user_db import get_all_whitelisted_users
+
+        whitelisted_emails = get_all_whitelisted_users()
 
         return jsonify({
             "emails": whitelisted_emails,
@@ -1014,9 +939,10 @@ def get_whitelist():
 
 @app.route("/api/admin/whitelist/add", methods=["POST"])
 def add_to_whitelist():
-    """Add an email to the user whitelist (updates .env file)."""
-    
+    """Add an email to the user whitelist (updates SQLite database)."""
     try:
+        from user_db import add_whitelisted_user, get_all_whitelisted_users
+
         data = request.json
         new_email = data.get("email", "").strip().lower()
 
@@ -1029,26 +955,16 @@ def add_to_whitelist():
         if not re.match(email_regex, new_email):
             return jsonify({"error": "Invalid email format"}), 400
 
-        # Get current whitelist
-        whitelist_str = os.getenv("USER_WHITELIST", "jesselitwinpdx@gmail.com", "")
-        whitelisted_emails = [e.strip().lower() for e in whitelist_str.split(",") if e.strip()]
+        # Add to database
+        success = add_whitelisted_user(new_email, added_by='admin_dashboard')
 
-        # Check if already exists
-        if new_email in whitelisted_emails:
+        if not success:
             return jsonify({"error": "Email already in whitelist"}), 400
 
-        # Add new email
-        whitelisted_emails.append(new_email)
-        new_whitelist_str = ",".join(whitelisted_emails)
-
-        # Update .env file
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        update_env_file(env_path, "USER_WHITELIST", new_whitelist_str)
-
-        # Update environment variable for current process
-        os.environ["USER_WHITELIST"] = new_whitelist_str
-
         print(f"✅ Added {new_email} to user whitelist")
+
+        # Get updated list
+        whitelisted_emails = get_all_whitelisted_users()
 
         return jsonify({
             "message": f"Successfully added {new_email} to user whitelist",
@@ -1062,34 +978,26 @@ def add_to_whitelist():
 
 @app.route("/api/admin/whitelist/remove", methods=["POST"])
 def remove_from_whitelist():
-    """Remove an email from the user whitelist (updates .env file)."""
+    """Remove an email from the user whitelist (updates SQLite database)."""
     try:
+        from user_db import remove_whitelisted_user, get_all_whitelisted_users
+
         data = request.json
         email_to_remove = data.get("email", "").strip().lower()
 
         if not email_to_remove:
             return jsonify({"error": "Email is required"}), 400
 
-        # Get current whitelist
-        whitelist_str = os.getenv("USER_WHITELIST", "")
-        whitelisted_emails = [e.strip().lower() for e in whitelist_str.split(",") if e.strip()]
+        # Remove from database
+        success = remove_whitelisted_user(email_to_remove)
 
-        # Check if exists
-        if email_to_remove not in whitelisted_emails:
+        if not success:
             return jsonify({"error": "Email not found in whitelist"}), 404
 
-        # Remove email
-        whitelisted_emails.remove(email_to_remove)
-        new_whitelist_str = ",".join(whitelisted_emails)
-
-        # Update .env file
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        update_env_file(env_path, "USER_WHITELIST", new_whitelist_str)
-
-        # Update environment variable for current process
-        os.environ["USER_WHITELIST"] = new_whitelist_str
-
         print(f"✅ Removed {email_to_remove} from user whitelist")
+
+        # Get updated list
+        whitelisted_emails = get_all_whitelisted_users()
 
         return jsonify({
             "message": f"Successfully removed {email_to_remove} from user whitelist",
@@ -1105,8 +1013,9 @@ def remove_from_whitelist():
 def get_adminlist():
     """Get the current admin list."""
     try:
-        admin_str = os.getenv("ADMIN_LIST", "")
-        admin_emails = [e.strip() for e in admin_str.split(",") if e.strip()]
+        from user_db import get_all_admins
+
+        admin_emails = get_all_admins()
 
         return jsonify({
             "emails": admin_emails,
@@ -1118,8 +1027,10 @@ def get_adminlist():
 
 @app.route("/api/admin/adminlist/add", methods=["POST"])
 def add_to_adminlist():
-    """Add an email to the admin list (updates .env file)."""
+    """Add an email to the admin list (updates SQLite database)."""
     try:
+        from user_db import add_admin, get_all_admins
+
         data = request.json
         new_email = data.get("email", "").strip().lower()
 
@@ -1132,26 +1043,16 @@ def add_to_adminlist():
         if not re.match(email_regex, new_email):
             return jsonify({"error": "Invalid email format"}), 400
 
-        # Get current admin list
-        admin_str = os.getenv("ADMIN_LIST", "")
-        admin_emails = [e.strip().lower() for e in admin_str.split(",") if e.strip()]
+        # Add to database
+        success = add_admin(new_email, added_by='admin_dashboard')
 
-        # Check if already exists
-        if new_email in admin_emails:
+        if not success:
             return jsonify({"error": "Email already in admin list"}), 400
 
-        # Add new email
-        admin_emails.append(new_email)
-        new_admin_str = ",".join(admin_emails)
-
-        # Update .env file
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        update_env_file(env_path, "ADMIN_LIST", new_admin_str)
-
-        # Update environment variable for current process
-        os.environ["ADMIN_LIST"] = new_admin_str
-
         print(f"✅ Added {new_email} to admin list")
+
+        # Get updated list
+        admin_emails = get_all_admins()
 
         return jsonify({
             "message": f"Successfully added {new_email} to admin list",
@@ -1165,34 +1066,26 @@ def add_to_adminlist():
 
 @app.route("/api/admin/adminlist/remove", methods=["POST"])
 def remove_from_adminlist():
-    """Remove an email from the admin list (updates .env file)."""
+    """Remove an email from the admin list (updates SQLite database)."""
     try:
+        from user_db import remove_admin, get_all_admins
+
         data = request.json
         email_to_remove = data.get("email", "").strip().lower()
 
         if not email_to_remove:
             return jsonify({"error": "Email is required"}), 400
 
-        # Get current admin list
-        admin_str = os.getenv("ADMIN_LIST", "")
-        admin_emails = [e.strip().lower() for e in admin_str.split(",") if e.strip()]
+        # Remove from database
+        success = remove_admin(email_to_remove)
 
-        # Check if exists
-        if email_to_remove not in admin_emails:
+        if not success:
             return jsonify({"error": "Email not found in admin list"}), 404
 
-        # Remove email
-        admin_emails.remove(email_to_remove)
-        new_admin_str = ",".join(admin_emails)
-
-        # Update .env file
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        update_env_file(env_path, "ADMIN_LIST", new_admin_str)
-
-        # Update environment variable for current process
-        os.environ["ADMIN_LIST"] = new_admin_str
-
         print(f"✅ Removed {email_to_remove} from admin list")
+
+        # Get updated list
+        admin_emails = get_all_admins()
 
         return jsonify({
             "message": f"Successfully removed {email_to_remove} from admin list",
