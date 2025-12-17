@@ -7,7 +7,11 @@ import sqlite3
 import os
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "sponsors.db")
+# Use persistent path if provided (Render), else local directory
+data_dir = os.getenv("SQLITE_DATA_PATH", os.path.dirname(__file__))
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
+DB_PATH = os.path.join(data_dir, "sponsors.db")
 
 
 def init_database():
