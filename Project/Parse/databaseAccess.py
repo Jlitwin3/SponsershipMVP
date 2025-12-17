@@ -54,7 +54,7 @@ from google.genai import types
 # =========================================
 # 2. ChromaDB Setup (Persistent)
 # =========================================
-print("📚 Loading ChromaDB...")
+print("Loading ChromaDB...")
 # Use absolute path for external storage (hidden folder in user's home dir)
 # Use environment variable for ChromaDB path (Render Persistent Disk) or default to local
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.expanduser("~/.chroma_db_data"))
@@ -620,21 +620,6 @@ def status():
         "total_documents": "13000+"
     })
 
-"""
-@app.route("/api/sponsors", methods=["GET"])
-def list_sponsors():
-    ""Get all current sponsors from the database.""
-    try:
-        sponsors = get_all_current_sponsors()
-        return jsonify({
-            "sponsors": sponsors,
-            "count": len(sponsors)
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-"""
-
 @app.route("/api/admin/upload", methods=["POST"])
 def upload_file():
     if 'files' not in request.files:
@@ -978,13 +963,19 @@ def verify_chatbot_email():
         # Get USER whitelist from environment variable
         user_whitelist_str = os.getenv("USER_WHITELIST", "")
         whitelisted_emails = [e.strip().lower() for e in user_whitelist_str.split(",") if e.strip()]
-
+        print("WHITE LIST: " + str(len(whitelisted_emails)) + " emails in whitelist")
         # Also get admin list - admins can access chatbot too
         admin_str = os.getenv("ADMIN_LIST", "")
         admin_emails = [e.strip().lower() for e in admin_str.split(",") if e.strip()]
 
         # Check if email is in either list
         is_authorized = email in whitelisted_emails or email in admin_emails
+        
+        #when switched to sql for user whitelist, and admin list, change to this: 
+        """
+        cursor.execute("SELECT 1 FROM users WHERE email = ? AND is_active = 1", (email,))
+        is_authorized = cursor.fetchone() is not None
+        """
 
         print(f"🔍 Chatbot access attempt: {email} - {'✅ Authorized' if is_authorized else '❌ Denied'}")
 
@@ -1030,7 +1021,7 @@ def add_to_whitelist():
             return jsonify({"error": "Invalid email format"}), 400
 
         # Get current whitelist
-        whitelist_str = os.getenv("USER_WHITELIST", "jesselitwinpdx@gmail.com", "")
+        whitelist_str = os.getenv("USER_WHITELIST", "")
         whitelisted_emails = [e.strip().lower() for e in whitelist_str.split(",") if e.strip()]
 
         # Check if already exists
