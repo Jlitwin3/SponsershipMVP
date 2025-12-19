@@ -955,16 +955,8 @@ def verify_chatbot_email():
         if not email:
             return jsonify({"error": "Email is required", "authorized": False}), 400
 
-        # Get USER whitelist from environment variable
-        user_whitelist_str = os.getenv("USER_WHITELIST", "")
-        whitelisted_emails = [e.strip().lower() for e in user_whitelist_str.split(",") if e.strip()]
-    
-        # Also get admin list - admins can access chatbot too
-        admin_str = os.getenv("ADMIN_LIST", "")
-        admin_emails = [e.strip().lower() for e in admin_str.split(",") if e.strip()]
-
-        # Check if email is in either list
-        is_authorized = email in whitelisted_emails or email in admin_emails
+        # Check SQL database for authorization (admins + whitelisted users)
+        is_authorized = is_authorized_for_chatbot(email)
 
         print(f"🔍 Chatbot access attempt: {email} - {'✅ Authorized' if is_authorized else '❌ Denied'}")
 
@@ -1011,9 +1003,8 @@ def add_to_whitelist():
         if not re.match(email_regex, new_email):
             return jsonify({"error": "Invalid email format"}), 400
 
-        # Get current whitelist
-        whitelist_str = os.getenv("USER_WHITELIST", "")
-        whitelisted_emails = [e.strip().lower() for e in whitelist_str.split(",") if e.strip()]
+        # Add to database
+        success = add_whitelisted_user(new_email, added_by='admin_dashboard')
 
         if not success:
             return jsonify({"error": "Email already in whitelist"}), 400

@@ -16,6 +16,33 @@ def get_connection():
     """Get database connection"""
     return sqlite3.connect(DB_PATH)
 
+def init_user_db():
+    """Initialize user database tables"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admins (
+            email TEXT PRIMARY KEY,
+            added_date TEXT,
+            added_by TEXT
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS whitelisted_users (
+            email TEXT PRIMARY KEY,
+            added_date TEXT,
+            added_by TEXT
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Initialize on module load
+init_user_db()
+
 # Admin functions
 def is_admin(email: str) -> bool:
     """Check if email is in admin list"""
