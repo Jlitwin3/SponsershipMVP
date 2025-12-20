@@ -122,6 +122,15 @@ processing_status = {
     "is_ready": SKIP_DROPBOX_INDEXING  # If skipping indexing, we are ready immediately
 }
 # =========================================
+# 6. Embedding Function (Moved up for initialization)
+# =========================================
+openrouter_embed = embedding_functions.OpenAIEmbeddingFunction(
+    api_key=API_KEY,
+    model_name="text-embedding-3-large",
+    api_base="https://openrouter.ai/api/v1"
+)
+
+# =========================================
 # 2. Dropbox Setup
 # =========================================
 dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
@@ -279,11 +288,7 @@ def chunk_text(text, size=500):
 # =========================================
 # 6. Embedding Function
 # =========================================
-openrouter_embed = embedding_functions.OpenAIEmbeddingFunction(
-    api_key=API_KEY,
-    model_name="text-embedding-3-large",
-    api_base="https://openrouter.ai/api/v1"
-)
+
 
 # =========================================
 # 7. Index PDFs Once
