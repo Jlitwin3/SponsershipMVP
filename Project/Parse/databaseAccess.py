@@ -130,6 +130,19 @@ CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.expanduser("~/.chroma_db_da
 if not os.path.exists(CHROMA_DB_PATH):
     os.makedirs(CHROMA_DB_PATH)
 
+# DEBUG: Check what's actually in the folder
+print(f"📂 Checking ChromaDB path: {CHROMA_DB_PATH}")
+try:
+    files = os.listdir(CHROMA_DB_PATH)
+    print(f"📂 Files in {CHROMA_DB_PATH}: {files}")
+    # Check if there's a nested folder (common SCP mistake)
+    for f in files:
+        full_path = os.path.join(CHROMA_DB_PATH, f)
+        if os.path.isdir(full_path):
+            print(f"   📂 Subdirectory found: {f} -> {os.listdir(full_path)}")
+except Exception as e:
+    print(f"❌ Error listing files: {e}")
+
 client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
 # Try to get existing collection first, create if it doesn't exist
@@ -149,8 +162,26 @@ try:
     image_collection = client.get_collection("image_embeddings")
     print(f"✅ Image collection found with {image_collection.count()} embeddings")
 except:
-    image_collection = None
-    print("⚠️  No image collection found - only PDFs will be searched")
+    # Collection doesn't exist, create it
+    image_collection = client.create_collection(
+        name="image_embeddings",
+        embedding_function=openrouter_embed
+    )
+    print(f"✅ Created new Image collection")
+
+# =========================================
+# 11. Startup Indexing (Runs on Module Load)
+# =========================================
+if not SKIP_DROPBOX_INDEXING:
+    # Only run indexing if not in a reloader process (to avoid double indexing locally)
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not os.environ.get("WERKZEUG_RUN_MAIN"):
+        print("Dropbox indexing enabled. PDFs will be scanned and updated.")
+        thread = threading.Thread(target=index_pdfs_if_new)
+        thread.daemon = True
+        thread.start()
+else:
+    processing_status["is_ready"] = True
+    print("Skipping Dropbox indexing — using existing ChromaDB data only.")
 
 # =========================================
 # 4. Flask Setup
@@ -1293,14 +1324,7 @@ def serve(path):
 # 11. Startup
 # =========================================
 if __name__ == "__main__":
-    if not SKIP_DROPBOX_INDEXING:
-        thread = threading.Thread(target=index_pdfs_if_new)
-        thread.daemon = True
-        thread.start()
-        print("Dropbox indexing enabled. PDFs will be scanned and updated.")
-    else:
-        processing_status["is_ready"] = True
-        print("Skipping Dropbox indexing — using existing ChromaDB data only.")
+
         
     print("\n Flask server running at http://localhost:5001")
     # Run the app
