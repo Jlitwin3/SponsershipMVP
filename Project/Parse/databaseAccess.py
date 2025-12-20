@@ -1,4 +1,7 @@
 import os
+# Disable tokenizers parallelism to prevent deadlocks in Gunicorn
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import fitz
 import numpy as np
 from io import BytesIO
@@ -404,6 +407,7 @@ def chat():
         return jsonify({"error": "No query provided"}), 400
 
     user_query = data["query"]
+    print(f"🚀 [DEBUG] Received chat request: {user_query}")
 
     if not processing_status["is_ready"]:
         return jsonify({"error": "PDFs still processing or not indexed yet."}), 400
@@ -469,7 +473,9 @@ def chat():
             pdf_count = 5
             image_count = 3
 
+        print(f"🔍 [DEBUG] Querying PDF collection with count={pdf_count}...")
         pdf_results = collection.query(query_texts=[user_query], n_results=pdf_count)
+        print(f"✅ [DEBUG] PDF query complete. Found {len(pdf_results['documents'][0]) if pdf_results['documents'] else 0} docs.")
 
         # Initialize combined results
         all_documents = []
@@ -483,7 +489,9 @@ def chat():
         # Query image collection if it exists
         if image_collection is not None:
             try:
+                print(f"🔍 [DEBUG] Querying Image collection with count={image_count}...")
                 image_results = image_collection.query(query_texts=[user_query], n_results=image_count)
+                print(f"✅ [DEBUG] Image query complete.")
                 if image_results["documents"][0]:
                     all_documents.extend(image_results["documents"][0])
                     all_metadatas.extend(image_results["metadatas"][0])
@@ -660,14 +668,14 @@ def chat():
             
         full_prompt += f"\nContext:\n{context}\n\nUser Question: {user_query}"
 
-        print("DEBUG: Sending request to Gemini...")
+        print("🚀 [DEBUG] Sending request to Gemini...")
         try:
             response = gemini_client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=full_prompt,
                 config=config
             )
-            print("DEBUG: Gemini response received.")
+            print("✅ [DEBUG] Gemini response received.")
         except Exception as e:
             print(f"ERROR: Gemini generation failed: {e}")
             raise e
