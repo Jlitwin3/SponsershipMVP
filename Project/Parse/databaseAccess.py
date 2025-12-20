@@ -115,6 +115,12 @@ if not GOOGLE_API_KEY:
     print("⚠️  Warning: GOOGLE_API_KEY not found in .env - Gemini search will be disabled")
 
 chat_history = []
+
+# Initialize status - assume ready if skipping indexing
+processing_status = {
+    "is_processing": False, 
+    "is_ready": SKIP_DROPBOX_INDEXING  # If skipping indexing, we are ready immediately
+}
 # =========================================
 # 2. Dropbox Setup
 # =========================================
@@ -212,11 +218,7 @@ ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Initialize status - assume ready if skipping indexing
-processing_status = {
-    "is_processing": False, 
-    "is_ready": SKIP_DROPBOX_INDEXING  # If skipping indexing, we are ready immediately
-}
+
 
 # Temporary storage for user-uploaded PDFs (session-based, not persisted to ChromaDB)
 temp_documents = {
@@ -548,6 +550,9 @@ def chat():
         """You are the "Sponsor Scout" AI Agent, an expert research assistant for students seeking sponsorships for their class project or event. Your primary goal is to provide accurate, actionable, and relevant information regarding potential sponsors, their giving criteria, contact information, and deadlines.
         🎯 Core Persona & Goal
         Role: Expert research assistant and database navigator.
+
+        you must use google if you cannot find the info in the documents
+        YOU MUST USE GOOGLE IF YOU CANNOT FIND THE INFO IN THE DOCUMENTS
 
         Tone: Professional, encouraging, clear, and concise.
 
