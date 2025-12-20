@@ -1,5 +1,6 @@
 import os
 # Disable tokenizers parallelism to prevent deadlocks in Gunicorn
+# MUST BE AT THE VERY TOP BEFORE ANY OTHER IMPORTS
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import fitz
@@ -44,7 +45,7 @@ from google.genai import types
 # =========================================
 # 2. ChromaDB Setup (Persistent)
 # =========================================
-print("📚 Loading ChromaDB...")
+print("📚 Loading ChromaDB...", flush=True)
 # Use absolute path for external storage (hidden folder in user's home dir)
 # Use environment variable for ChromaDB path (Render Persistent Disk) or default to local
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.expanduser("~/.chroma_db_data"))
@@ -88,7 +89,7 @@ except Exception as e:
 # =========================================
 # 4. Initialize Gemini
 # =========================================
-print("🤖 Initializing Gemini...")
+print("🤖 Initializing Gemini...", flush=True)
 if os.getenv("GOOGLE_API_KEY"):
     gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     grounding_tool = types.Tool(
@@ -149,10 +150,10 @@ if not os.path.exists(CHROMA_DB_PATH):
     os.makedirs(CHROMA_DB_PATH)
 
 # DEBUG: Check what's actually in the folder
-print(f"📂 Checking ChromaDB path: {CHROMA_DB_PATH}")
+print(f"📂 Checking ChromaDB path: {CHROMA_DB_PATH}", flush=True)
 try:
     files = os.listdir(CHROMA_DB_PATH)
-    print(f"📂 Files in {CHROMA_DB_PATH}: {files}")
+    print(f"📂 Files in {CHROMA_DB_PATH}: {files}", flush=True)
     # Check if there's a nested folder (common SCP mistake)
     for f in files:
         full_path = os.path.join(CHROMA_DB_PATH, f)
@@ -165,10 +166,10 @@ client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
 # Try to get existing collection first, create if it doesn't exist
 try:
-    print("🚀 [DEBUG] Checking for existing PDF collection...")
+    print("🚀 [DEBUG] Checking for existing PDF collection...", flush=True)
     collection = client.get_collection("pdf_embeddings")
-    print(f"✅ PDF collection found.")
-    print(f"✅ PDF collection found. Current count: {collection.count()}")
+    print(f"✅ PDF collection found.", flush=True)
+    print(f"✅ PDF collection found. Current count: {collection.count()}", flush=True)
 except:
     # Collection doesn't exist, create it
     collection = client.create_collection(
@@ -179,10 +180,10 @@ except:
 
 # Get image collection (if it exists)
 try:
-    print("🚀 [DEBUG] Checking for existing Image collection...")
+    print("🚀 [DEBUG] Checking for existing Image collection...", flush=True)
     image_collection = client.get_collection("image_embeddings")
-    print(f"✅ Image collection found.")
-    print(f"✅ Image collection found with {image_collection.count()} embeddings")
+    print(f"✅ Image collection found.", flush=True)
+    print(f"✅ Image collection found with {image_collection.count()} embeddings", flush=True)
 except:
     # Collection doesn't exist, create it
     image_collection = client.create_collection(
@@ -218,11 +219,11 @@ else:
     print(f"❌ BUILD_FOLDER not found! Current working directory: {os.getcwd()}")
     print(f"❌ __file__ location: {os.path.abspath(__file__)}")
     
-print("Initializing Flask app...")
+print("Initializing Flask app...", flush=True)
 app = Flask(__name__, static_folder=BUILD_FOLDER, static_url_path='/')
-print("Flask app initialized.")
+print("Flask app initialized.", flush=True)
 CORS(app)
-print("CORS enabled.")
+print("CORS enabled.", flush=True)
 
 # Configure upload folder
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
@@ -247,9 +248,9 @@ temp_documents = {
 }
 
 # Initialize query classifier
-print("Initializing query classifier...")
+print("Initializing query classifier...", flush=True)
 query_classifier = QueryClassifier()
-print("Query classifier initialized.")
+print("Query classifier initialized.", flush=True)
 
 # =========================================
 # 5. Helper Functions
@@ -425,8 +426,10 @@ def chat():
 
     try:
         # ===== Step 1: Classify the query =====
+        print(f"📊 [DEBUG] Classifying query...", flush=True)
+        classification_start = time.time()
         classification = query_classifier.classify(user_query)
-        print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})", flush=True)
+        print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%}) in {time.time() - classification_start:.2f}s", flush=True)
 
         # Check if query is off-topic
         """
@@ -486,8 +489,15 @@ def chat():
 
         print(f"🔍 [DEBUG] Querying PDF collection with count={pdf_count}...", flush=True)
         retrieval_start = time.time()
+        
+        # Manually embed to see if it's the embedding or the search that's slow
+        print(f"🔍 [DEBUG] Generating query embedding...", flush=True)
+        embed_start = time.time()
+        # Note: We use the default embedding function for PDF collection as it was likely created with it
+        # If it was created with openrouter_embed, this will fail with dimension mismatch
+        print("starting query at time:{embed_start}")
         pdf_results = collection.query(query_texts=[user_query], n_results=pdf_count)
-        print(f"✅ [DEBUG] PDF query complete ({time.time() - retrieval_start:.2f}s). Found {len(pdf_results['documents'][0]) if pdf_results['documents'] else 0} docs.", flush=True)
+        print(f"✅ [DEBUG] PDF query complete ({time.time() - retrieval_start:.2f}s total, {time.time() - embed_start:.2f}s for query). Found {len(pdf_results['documents'][0]) if pdf_results['documents'] else 0} docs.", flush=True)
 
         # Initialize combined results
         all_documents = []
