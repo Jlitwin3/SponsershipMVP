@@ -407,6 +407,8 @@ def chat():
         return jsonify({"error": "No query provided"}), 400
 
     user_query = data["query"]
+    import time
+    start_time = time.time()
     print(f"🚀 [DEBUG] Received chat request: {user_query}")
 
     if not processing_status["is_ready"]:
@@ -474,8 +476,9 @@ def chat():
             image_count = 3
 
         print(f"🔍 [DEBUG] Querying PDF collection with count={pdf_count}...")
+        retrieval_start = time.time()
         pdf_results = collection.query(query_texts=[user_query], n_results=pdf_count)
-        print(f"✅ [DEBUG] PDF query complete. Found {len(pdf_results['documents'][0]) if pdf_results['documents'] else 0} docs.")
+        print(f"✅ [DEBUG] PDF query complete ({time.time() - retrieval_start:.2f}s). Found {len(pdf_results['documents'][0]) if pdf_results['documents'] else 0} docs.")
 
         # Initialize combined results
         all_documents = []
@@ -669,13 +672,15 @@ def chat():
         full_prompt += f"\nContext:\n{context}\n\nUser Question: {user_query}"
 
         print("🚀 [DEBUG] Sending request to Gemini...")
+        llm_start = time.time()
         try:
             response = gemini_client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=full_prompt,
                 config=config
             )
-            print("✅ [DEBUG] Gemini response received.")
+            print(f"✅ [DEBUG] Gemini response received ({time.time() - llm_start:.2f}s).")
+            print(f"⏱️ [DEBUG] Total chat processing time: {time.time() - start_time:.2f}s")
         except Exception as e:
             print(f"ERROR: Gemini generation failed: {e}")
             raise e
