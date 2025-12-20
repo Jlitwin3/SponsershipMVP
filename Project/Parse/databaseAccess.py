@@ -165,7 +165,9 @@ client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
 # Try to get existing collection first, create if it doesn't exist
 try:
+    print("🚀 [DEBUG] Checking for existing PDF collection...")
     collection = client.get_collection("pdf_embeddings")
+    print(f"✅ PDF collection found.")
     print(f"✅ PDF collection found. Current count: {collection.count()}")
 except:
     # Collection doesn't exist, create it
@@ -177,7 +179,9 @@ except:
 
 # Get image collection (if it exists)
 try:
+    print("🚀 [DEBUG] Checking for existing Image collection...")
     image_collection = client.get_collection("image_embeddings")
+    print(f"✅ Image collection found.")
     print(f"✅ Image collection found with {image_collection.count()} embeddings")
 except:
     # Collection doesn't exist, create it
@@ -214,8 +218,11 @@ else:
     print(f"❌ BUILD_FOLDER not found! Current working directory: {os.getcwd()}")
     print(f"❌ __file__ location: {os.path.abspath(__file__)}")
     
+print("Initializing Flask app...")
 app = Flask(__name__, static_folder=BUILD_FOLDER, static_url_path='/')
+print("Flask app initialized.")
 CORS(app)
+print("CORS enabled.")
 
 # Configure upload folder
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
@@ -240,7 +247,9 @@ temp_documents = {
 }
 
 # Initialize query classifier
+print("Initializing query classifier...")
 query_classifier = QueryClassifier()
+print("Query classifier initialized.")
 
 # =========================================
 # 5. Helper Functions
@@ -409,7 +418,7 @@ def chat():
     user_query = data["query"]
     import time
     start_time = time.time()
-    print(f"🚀 [DEBUG] Received chat request: {user_query}")
+    print(f"🚀 [DEBUG] Received chat request: {user_query}", flush=True)
 
     if not processing_status["is_ready"]:
         return jsonify({"error": "PDFs still processing or not indexed yet."}), 400
@@ -417,7 +426,7 @@ def chat():
     try:
         # ===== Step 1: Classify the query =====
         classification = query_classifier.classify(user_query)
-        print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})")
+        print(f"📊 Query classified as: {classification['type']} (confidence: {classification['confidence']:.0%})", flush=True)
 
         # Check if query is off-topic
         """
@@ -475,10 +484,10 @@ def chat():
             pdf_count = 5
             image_count = 3
 
-        print(f"🔍 [DEBUG] Querying PDF collection with count={pdf_count}...")
+        print(f"🔍 [DEBUG] Querying PDF collection with count={pdf_count}...", flush=True)
         retrieval_start = time.time()
         pdf_results = collection.query(query_texts=[user_query], n_results=pdf_count)
-        print(f"✅ [DEBUG] PDF query complete ({time.time() - retrieval_start:.2f}s). Found {len(pdf_results['documents'][0]) if pdf_results['documents'] else 0} docs.")
+        print(f"✅ [DEBUG] PDF query complete ({time.time() - retrieval_start:.2f}s). Found {len(pdf_results['documents'][0]) if pdf_results['documents'] else 0} docs.", flush=True)
 
         # Initialize combined results
         all_documents = []
@@ -671,7 +680,7 @@ def chat():
             
         full_prompt += f"\nContext:\n{context}\n\nUser Question: {user_query}"
 
-        print("🚀 [DEBUG] Sending request to Gemini...")
+        print("🚀 [DEBUG] Sending request to Gemini...", flush=True)
         llm_start = time.time()
         try:
             response = gemini_client.models.generate_content(
@@ -679,8 +688,8 @@ def chat():
                 contents=full_prompt,
                 config=config
             )
-            print(f"✅ [DEBUG] Gemini response received ({time.time() - llm_start:.2f}s).")
-            print(f"⏱️ [DEBUG] Total chat processing time: {time.time() - start_time:.2f}s")
+            print(f"✅ [DEBUG] Gemini response received ({time.time() - llm_start:.2f}s).", flush=True)
+            print(f"⏱️ [DEBUG] Total chat processing time: {time.time() - start_time:.2f}s", flush=True)
         except Exception as e:
             print(f"ERROR: Gemini generation failed: {e}")
             raise e
