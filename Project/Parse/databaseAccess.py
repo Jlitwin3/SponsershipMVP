@@ -232,6 +232,14 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+@app.before_request
+def log_request_info():
+    print(f"📡 [DEBUG] Global Request: {request.method} {request.path}", flush=True)
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "time": time.time()}), 200
+
 
 ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg'}
 
@@ -412,19 +420,22 @@ def extract_sponsor_mentions(query: str) -> list:
 # =========================================
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    data = request.json
-    if not data or "query" not in data:
-        return jsonify({"error": "No query provided"}), 400
-
-    user_query = data["query"]
     import time
     start_time = time.time()
-    print(f"🚀 [DEBUG] Received chat request: {user_query}", flush=True)
-
-    if not processing_status["is_ready"]:
-        return jsonify({"error": "PDFs still processing or not indexed yet."}), 400
-
+    print(f"🚀 [DEBUG] Entering chat function", flush=True)
+    
     try:
+        data = request.get_json(silent=True)
+        if not data:
+             print(f"❌ [DEBUG] No JSON data found in request", flush=True)
+             return jsonify({"error": "No query provided"}), 400
+        
+        user_query = data.get("query")
+        print(f"🚀 [DEBUG] Received chat query: {user_query}", flush=True)
+
+        if not processing_status["is_ready"]:
+            return jsonify({"error": "PDFs still processing or not indexed yet."}), 400
+
         # ===== Step 1: Classify the query =====
         print(f"📊 [DEBUG] Classifying query...", flush=True)
         classification_start = time.time()
@@ -511,15 +522,16 @@ def chat():
         # Query image collection if it exists
         if image_collection is not None:
             try:
-                print(f"🔍 [DEBUG] Querying Image collection with count={image_count}...")
+                print(f"🔍 [DEBUG] Querying Image collection with count={image_count}...", flush=True)
+                img_retrieval_start = time.time()
                 image_results = image_collection.query(query_texts=[user_query], n_results=image_count)
-                print(f"✅ [DEBUG] Image query complete.")
+                print(f"✅ [DEBUG] Image query complete ({time.time() - img_retrieval_start:.2f}s).", flush=True)
                 if image_results["documents"][0]:
                     all_documents.extend(image_results["documents"][0])
                     all_metadatas.extend(image_results["metadatas"][0])
-                    print(f"✅ Found {len(image_results['documents'][0])} relevant image chunks")
+                    print(f"✅ Found {len(image_results['documents'][0])} relevant image chunks", flush=True)
             except Exception as img_err:
-                print(f"⚠️  Error querying image collection: {img_err}")
+                print(f"⚠️  Error querying image collection: {img_err}", flush=True)
 
         # =========================================
         # 6. Web Search (Fallback/Augmentation)
