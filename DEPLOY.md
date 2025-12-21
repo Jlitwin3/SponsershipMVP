@@ -28,8 +28,8 @@ Since Render's Python environment doesn't build React apps by default, the easie
 ## 3. Deploying to Render
 1.  **New Web Service**: Connect your GitHub repo.
 2.  **Runtime**: Python 3.
-3.  **Build Command**: `pip install -r Project/Parse/requirements.txt`
-4.  **Start Command**: `gunicorn --timeout 300 --workers 1 --bind 0.0.0.0:$PORT Project.Parse.databaseAccess:app`
+3.  **Build Command**: `pip install -r requirements.txt`
+4.  **Start Command**: `gunicorn --timeout 300 --workers 1 --bind 0.0.0.0:$PORT databaseAccess:app`
     *   *Note: The `Procfile` in `Project/Parse/Procfile` also defines this.*
 5.  **Root Directory**: `Project/Parse` (Important!)
 
