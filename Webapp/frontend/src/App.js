@@ -23,7 +23,6 @@ const msalConfig = {
 const msalInstance = new PublicClientApplication(msalConfig);
 
 function App() {
-  const [isReady, setIsReady] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
@@ -49,22 +48,18 @@ function App() {
         console.log('📊 Backend status:', data);
 
         if (data.processed) {
-          setIsReady(true);
           setIsProcessing(false);
         } else if (data.is_processing) {
-          setIsReady(false);
           setIsProcessing(true);
           // Keep polling every 2 seconds while processing
           setTimeout(checkStatus, 2000);
         } else {
           // If not processing and not processed, we assume it's ready but empty
-          setIsReady(true);
           setIsProcessing(false);
         }
       } catch (err) {
         console.error('❌ Failed to check status:', err);
         // Don't block the UI on network errors
-        setIsReady(true);
         setIsProcessing(false);
       }
     };
