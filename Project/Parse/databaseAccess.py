@@ -205,7 +205,13 @@ def chat():
                 if conflict_info['conflict']:
                     sponsor_context += f"\n[Important Sponsorship Notice]\nRegarding {sponsor_name}:\n{conflict_info['details']}\n"
 
-        # 3. Vector Search
+        # 3. Generate Query Embedding (Once)
+        print(f"🧠 [DEBUG] Generating query embedding...", flush=True)
+        embed_start = time.time()
+        query_embedding = openrouter_embed([user_query])[0]
+        print(f"✅ [DEBUG] Embedding generated in {time.time() - embed_start:.2f}s", flush=True)
+
+        # 4. Vector Search
         if classification['type'] == query_classifier.TEMPORAL:
             pdf_count, image_count = 7, 4
         elif classification['type'] == query_classifier.LIST_REQUEST:
@@ -214,21 +220,24 @@ def chat():
             pdf_count, image_count = 5, 3
 
         print(f"🔍 [DEBUG] Querying PDF collection...", flush=True)
-        pdf_results = collection.query(query_texts=[user_query], n_results=pdf_count)
+        search_start = time.time()
+        pdf_results = collection.query(query_embeddings=[query_embedding], n_results=pdf_count)
         
         all_documents = pdf_results["documents"][0] if pdf_results["documents"] else []
         all_metadatas = pdf_results["metadatas"][0] if pdf_results["metadatas"] else []
 
         if image_collection:
             try:
-                img_results = image_collection.query(query_texts=[user_query], n_results=image_count)
+                print(f"🔍 [DEBUG] Querying Image collection...", flush=True)
+                img_results = image_collection.query(query_embeddings=[query_embedding], n_results=image_count)
                 if img_results["documents"]:
                     all_documents.extend(img_results["documents"][0])
                     all_metadatas.extend(img_results["metadatas"][0])
             except Exception as e:
                 print(f"⚠️ Image query failed: {e}")
+        print(f"✅ [DEBUG] Vector search complete in {time.time() - search_start:.2f}s", flush=True)
 
-        # 4. Build Context
+        # 5. Build Context
         context_parts = []
         if sponsor_context: context_parts.append(sponsor_context)
         for doc, meta in zip(all_documents, all_metadatas):
@@ -321,14 +330,17 @@ def chat():
             
         full_prompt += f"\nContext:\n{context}\n\nUser Question: {user_query}"
 
+        print(f"🚀 [DEBUG] Calling Gemini...", flush=True)
+        llm_start = time.time()
         response = gemini_client.models.generate_content(
             model="gemini-2.0-flash",
             contents=full_prompt,
             config=types.GenerateContentConfig(tools=[grounding_tool])
         )
+        print(f"✅ [DEBUG] Gemini responded in {time.time() - llm_start:.2f}s", flush=True)
         
         chat_history.append({"role": "assistant", "content": response.text})
-        print(f"✅ [DEBUG] Chat complete in {time.time() - start_time:.2f}s", flush=True)
+        print(f"✨ [DEBUG] Total chat time: {time.time() - start_time:.2f}s", flush=True)
         return jsonify({"answer": response.text})
 
     except Exception as e:
