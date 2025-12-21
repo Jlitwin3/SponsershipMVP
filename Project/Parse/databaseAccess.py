@@ -151,13 +151,31 @@ def extract_sponsor_mentions(query: str) -> list:
 
 @app.route("/api/status", methods=["GET"])
 def status():
-    return jsonify({
-        "processed": processing_status["is_ready"],
-        "is_processing": processing_status["is_processing"],
-        "collection_size": collection.count(),
-        "image_collection_size": image_collection.count() if image_collection else 0,
-        "total_documents": collection.count() + (image_collection.count() if image_collection else 0)
-    })
+    try:
+        # Get counts safely
+        pdf_count = 0
+        img_count = 0
+        try:
+            pdf_count = collection.count()
+            if image_collection:
+                img_count = image_collection.count()
+        except Exception as e:
+            print(f"⚠️  Error counting collections: {e}")
+
+        return jsonify({
+            "processed": True, # Always true now since we skip indexing
+            "is_processing": False,
+            "collection_size": pdf_count,
+            "image_collection_size": img_count,
+            "total_documents": pdf_count + img_count
+        })
+    except Exception as e:
+        print(f"❌ Status route critical error: {e}")
+        return jsonify({
+            "processed": True,
+            "is_processing": False,
+            "error": str(e)
+        })
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -353,9 +371,7 @@ def reset_db():
         collection = client.create_collection(name="pdf_embeddings", embedding_function=openrouter_embed)
         image_collection = client.create_collection(name="image_embeddings", embedding_function=openrouter_embed)
         
-        from dropbox_indexer import index_pdfs_if_new
-        threading.Thread(target=index_pdfs_if_new, args=(collection, processing_status), daemon=True).start()
-        return jsonify({"message": "Database reset and re-indexing started"})
+        return jsonify({"message": "Database collections reset. Please run dropbox_indexer.py manually to re-index."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
