@@ -22,6 +22,6 @@ ls -la Webapp/frontend/build/ || echo "❌ Build folder not found at expected lo
 
 # Install Backend Dependencies
 echo "📦 Installing Backend Dependencies..."
-pip install -r Project/requirements.txt
+pip install -r Project/Parse/requirements.txt
 
 echo "✅ Build script completed!"
