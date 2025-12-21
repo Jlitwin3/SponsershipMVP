@@ -7,7 +7,7 @@ services:
     startCommand: "gunicorn --timeout 300 --workers 1 --bind 0.0.0.0:$PORT Project.Parse.databaseAccess:app"
     disk:
       name: chroma-data
-      mountPath: /var/lib/chroma
+      mountPath: /var/data/.chroma_db_data
       sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
@@ -15,7 +15,7 @@ services:
       - key: PYTHONPATH
         value: ./Project/Parse
       - key: CHROMA_DB_PATH
-        value: /var/lib/chroma
+        value: /var/data/.chroma_db_data
       - key: OPENROUTER_API_KEY
         sync: false
       - key: DROPBOX_ACCESS_TOKEN
