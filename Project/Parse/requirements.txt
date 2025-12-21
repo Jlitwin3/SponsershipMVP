@@ -11,3 +11,4 @@ numpy>=1.26.4
 httpx==0.26.0
 werkzeug==3.0.1
 psutil==5.9.8
+setuptools
