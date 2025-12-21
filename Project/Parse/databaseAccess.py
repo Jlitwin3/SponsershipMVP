@@ -55,11 +55,36 @@ from google.genai import types
 # =========================================
 # 2. Embedding Functions
 # =========================================
-# This is the "key" to seeing your 152MB of data
-openrouter_embed = embedding_functions.OpenAIEmbeddingFunction(
+class OpenRouterEmbeddingFunction(embedding_functions.EmbeddingFunction):
+    def __init__(self, api_key, model_name="text-embedding-3-small"):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.url = "https://openrouter.ai/api/v1/embeddings"
+
+    def __call__(self, input):
+        if isinstance(input, str):
+            input = [input]
+        
+        response = requests.post(
+            self.url,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": self.model_name,
+                "input": input
+            }
+        )
+        response.raise_for_status()
+        data = response.json()
+        # OpenRouter returns a list of objects with an "embedding" field
+        return [item["embedding"] for item in data["data"]]
+
+# This is the "key" to seeing your data
+openrouter_embed = OpenRouterEmbeddingFunction(
     api_key=OPENROUTER_API_KEY,
-    model_name="text-embedding-3-small",
-    api_base="https://openrouter.ai/api/v1"
+    model_name="text-embedding-3-small"
 )
 
 # =========================================

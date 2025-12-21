@@ -7,6 +7,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import chromadb
 from chromadb.utils import embedding_functions
+import requests
 
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "/var/data/chroma")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -28,10 +29,30 @@ def _init():
 
         _client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
-        embed_fn = embedding_functions.OpenAIEmbeddingFunction(
+        class OpenRouterEmbeddingFunction(embedding_functions.EmbeddingFunction):
+            def __init__(self, api_key, model_name="text-embedding-3-small"):
+                self.api_key = api_key
+                self.model_name = model_name
+                self.url = "https://openrouter.ai/api/v1/embeddings"
+
+            def __call__(self, input):
+                if isinstance(input, str):
+                    input = [input]
+                response = requests.post(
+                    self.url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={"model": self.model_name, "input": input}
+                )
+                response.raise_for_status()
+                data = response.json()
+                return [item["embedding"] for item in data["data"]]
+
+        embed_fn = OpenRouterEmbeddingFunction(
             api_key=OPENROUTER_API_KEY,
-            model_name="text-embedding-3-large",
-            api_base="https://openrouter.ai/api/v1",
+            model_name="text-embedding-3-small"
         )
 
         _pdf_collection = _client.get_or_create_collection(

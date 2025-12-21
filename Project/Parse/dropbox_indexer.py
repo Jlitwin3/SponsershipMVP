@@ -5,6 +5,7 @@ from io import BytesIO
 import chromadb
 from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
+import requests
 
 # Load environment variables
 env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -23,11 +24,35 @@ if not OPENROUTER_API_KEY:
 dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN) if DROPBOX_ACCESS_TOKEN else None
 DROPBOX_FOLDER = "/L’mu-Oa (Sports Sponsorship AI Project)"
 
-# Initialize Embedding Function (Must match dbAccess2.py)
-openrouter_embed = embedding_functions.OpenAIEmbeddingFunction(
+# Initialize Embedding Function (Must match databaseAccess.py)
+class OpenRouterEmbeddingFunction(embedding_functions.EmbeddingFunction):
+    def __init__(self, api_key, model_name="text-embedding-3-small"):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.url = "https://openrouter.ai/api/v1/embeddings"
+
+    def __call__(self, input):
+        if isinstance(input, str):
+            input = [input]
+        
+        response = requests.post(
+            self.url,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": self.model_name,
+                "input": input
+            }
+        )
+        response.raise_for_status()
+        data = response.json()
+        return [item["embedding"] for item in data["data"]]
+
+openrouter_embed = OpenRouterEmbeddingFunction(
     api_key=OPENROUTER_API_KEY,
-    model_name="text-embedding-3-small",
-    api_base="https://openrouter.ai/api/v1"
+    model_name="text-embedding-3-small"
 )
 
 def fetch_dropbox_files(extensions, folder_path=DROPBOX_FOLDER):
