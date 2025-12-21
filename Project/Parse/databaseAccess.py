@@ -2,10 +2,7 @@ import os
 # Disable tokenizers parallelism to prevent deadlocks in Gunicorn
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-import fitz
 import numpy as np
-from io import BytesIO
-import dropbox
 import chromadb
 from chromadb.utils import embedding_functions
 from flask import Flask, request, jsonify
@@ -32,8 +29,6 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.expanduser("~/.chroma_db_data"))
 
-if not DROPBOX_ACCESS_TOKEN:
-    print("⚠️  Warning: DROPBOX_ACCESS_TOKEN not found in .env")
 if not OPENROUTER_API_KEY:
     print("⚠️  Warning: OPENROUTER_API_KEY not found in .env")
 if not GOOGLE_API_KEY:
