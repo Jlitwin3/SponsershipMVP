@@ -10,3 +10,4 @@ gunicorn==21.2.0
 numpy==1.26.3
 httpx==0.26.0
 werkzeug==3.0.1
+psutil==5.9.8

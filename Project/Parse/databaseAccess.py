@@ -19,6 +19,7 @@ import shutil
 import sys
 import tempfile
 import time
+import psutil
 
 # =========================================
 # 1. Load environment variables
@@ -57,7 +58,7 @@ from google.genai import types
 # This is the "key" to seeing your 152MB of data
 openrouter_embed = embedding_functions.OpenAIEmbeddingFunction(
     api_key=OPENROUTER_API_KEY,
-    model_name="text-embedding-3-large",
+    model_name="text-embedding-3-small",
     api_base="https://openrouter.ai/api/v1"
 )
 
@@ -146,6 +147,11 @@ print("Query Classifier Initialized")
 # =========================================
 # 6. Helper Functions
 # =========================================
+def get_memory_usage():
+    process = psutil.Process(os.getpid())
+    mem_mb = process.memory_info().rss / (1024 * 1024)
+    return f"{mem_mb:.2f} MB"
+
 def extract_sponsor_mentions(query: str) -> list:
     print("Extracting Sponsor Mentions")
     sponsor_keywords = ["propose", "sponsor", "partnership", "deal", "agreement"]
@@ -196,6 +202,7 @@ def status():
 def chat():
     start_time = time.time()
     try:
+        print(f"📊 [MEM] Start: {get_memory_usage()}", flush=True)
         print("getting data json")
         data = request.get_json(silent=True)
         print("data json received")
@@ -215,7 +222,7 @@ def chat():
         print("Getting sponsor context")
         sponsor_context = ""
         sponsor_mentions = classification['entities'] if classification['needs_db'] else extract_sponsor_mentions(user_query)
-        
+        print("sponsor mentions gathered")
         if sponsor_mentions:
             for sponsor_name in sponsor_mentions:
                 sponsor_info = get_sponsor_info(sponsor_name)
@@ -227,10 +234,10 @@ def chat():
                     sponsor_context += f"\n[Important Sponsorship Notice]\nRegarding {sponsor_name}:\n{conflict_info['details']}\n"
 
         # 3. Generate Query Embedding (Once)
-        print(f"🧠 [DEBUG] Generating query embedding...", flush=True)
+        print(f"🧠 [DEBUG] Generating query embedding... (Mem: {get_memory_usage()})", flush=True)
         embed_start = time.time()
         query_embedding = openrouter_embed([user_query])[0]
-        print(f"✅ [DEBUG] Embedding generated in {time.time() - embed_start:.2f}s", flush=True)
+        print(f"✅ [DEBUG] Embedding generated in {time.time() - embed_start:.2f}s (Mem: {get_memory_usage()})", flush=True)
 
         # 4. Vector Search
         if classification['type'] == query_classifier.TEMPORAL:
@@ -243,28 +250,33 @@ def chat():
         print(f"🔍 [DEBUG] Querying PDF collection...", flush=True)
         search_start = time.time()
         pdf_results = collection.query(query_embeddings=[query_embedding], n_results=pdf_count)
-        
+        print("pdf results gathered")
         all_documents = pdf_results["documents"][0] if pdf_results["documents"] else []
         all_metadatas = pdf_results["metadatas"][0] if pdf_results["metadatas"] else []
+        print("all documents and metadatas gathered")
 
         if image_collection:
             try:
                 print(f"🔍 [DEBUG] Querying Image collection...", flush=True)
                 img_results = image_collection.query(query_embeddings=[query_embedding], n_results=image_count)
+                print("image results gathered")
                 if img_results["documents"]:
                     all_documents.extend(img_results["documents"][0])
                     all_metadatas.extend(img_results["metadatas"][0])
             except Exception as e:
                 print(f"⚠️ Image query failed: {e}")
-        print(f"✅ [DEBUG] Vector search complete in {time.time() - search_start:.2f}s", flush=True)
+        print(f"✅ [DEBUG] Vector search complete in {time.time() - search_start:.2f}s (Mem: {get_memory_usage()})", flush=True)
 
         # 5. Build Context
         context_parts = []
+        print("building context")
         if sponsor_context: context_parts.append(sponsor_context)
+        print("sponsor context added")
         for doc, meta in zip(all_documents, all_metadatas):
             source_type = meta.get('type', 'pdf')
             source_name = meta.get('source', 'unknown')
             context_parts.append(f"[From {source_type}: {source_name}]\n{doc}")
+            print("document added to context")
         
         if temp_documents['is_ready']:
             context_parts.extend([f"[From temporary upload]\n{t}" for t in temp_documents['texts'][:5]])
@@ -273,8 +285,10 @@ def chat():
         
         # 5. LLM Call
         if not gemini_client:
-             return jsonify({"error": "Gemini API key not configured"}), 500
-
+            print("Gemini client not initialized")
+            return jsonify({"error": "Gemini API key not configured"}), 500
+        print("Gemini client initialized")
+        
         system_prompt = """You are the "Sponsor Scout" AI Agent, an expert research assistant for students seeking sponsorships for their class project or event. Your primary goal is to provide accurate, actionable, and relevant information regarding potential sponsors, their giving criteria, contact information, and deadlines.
         🎯 Core Persona & Goal
         Role: Expert research assistant and database navigator.
@@ -358,10 +372,10 @@ def chat():
             contents=full_prompt,
             config=types.GenerateContentConfig(tools=[grounding_tool])
         )
-        print(f"✅ [DEBUG] Gemini responded in {time.time() - llm_start:.2f}s", flush=True)
+        print(f"✅ [DEBUG] Gemini responded in {time.time() - llm_start:.2f}s (Mem: {get_memory_usage()})", flush=True)
         
         chat_history.append({"role": "assistant", "content": response.text})
-        print(f"✨ [DEBUG] Total chat time: {time.time() - start_time:.2f}s", flush=True)
+        print(f"✨ [DEBUG] Total chat time: {time.time() - start_time:.2f}s (Final Mem: {get_memory_usage()})", flush=True)
         return jsonify({"answer": response.text})
 
     except Exception as e:

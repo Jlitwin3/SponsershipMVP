@@ -53,3 +53,4 @@ To keep your PDF index from disappearing on every restart:
 ## 5. Troubleshooting
 *   **Timeout Errors**: We increased the timeout to 300s (5 mins) to allow the AI model to load.
 *   **Worker Killed**: If you see "Worker was sent SIGKILL", it usually means the free tier memory (512MB) was exceeded. Upgrade to the Starter plan ($9/mo) for 2GB RAM.
+

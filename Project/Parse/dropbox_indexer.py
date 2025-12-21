@@ -26,7 +26,7 @@ DROPBOX_FOLDER = "/L’mu-Oa (Sports Sponsorship AI Project)"
 # Initialize Embedding Function (Must match dbAccess2.py)
 openrouter_embed = embedding_functions.OpenAIEmbeddingFunction(
     api_key=OPENROUTER_API_KEY,
-    model_name="text-embedding-3-large",
+    model_name="text-embedding-3-small",
     api_base="https://openrouter.ai/api/v1"
 )
 
