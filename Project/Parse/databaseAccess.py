@@ -444,6 +444,27 @@ def reset_db():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/admin/delete", methods=["POST"])
+def delete_admin_file():
+    data = request.json
+    filename = data.get("filename", "").strip()
+    confirm_filename = data.get("confirmFilename", "").strip()
+
+    if not filename or filename != confirm_filename:
+        return jsonify({"error": "Filenames do not match or are empty"}), 400
+
+    try:
+        # Delete from ChromaDB
+        # We need to find all IDs associated with this source
+        results = collection.get(where={"source": filename})
+        if results["ids"]:
+            collection.delete(ids=results["ids"])
+            return jsonify({"success": True, "message": f"Successfully deleted {filename} and its {len(results['ids'])} chunks."})
+        else:
+            return jsonify({"error": f"File {filename} not found in database"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/admin/upload", methods=["POST"])
 def admin_upload():
     # Support both 'files' (multiple) and 'file' (single) keys
@@ -544,6 +565,22 @@ def remove_from_whitelist():
 def get_adminlist():
     from user_db import get_all_admins
     return jsonify({"emails": get_all_admins()})
+
+@app.route("/api/admin/adminlist/add", methods=["POST"])
+def add_to_adminlist():
+    from user_db import add_admin
+    email = request.json.get("email", "").strip().lower()
+    if add_admin(email):
+        return jsonify({"success": True, "message": f"Added {email} as admin"})
+    return jsonify({"error": "Already exists"}), 400
+
+@app.route("/api/admin/adminlist/remove", methods=["POST"])
+def remove_from_adminlist():
+    from user_db import remove_admin
+    email = request.json.get("email", "").strip().lower()
+    if remove_admin(email):
+        return jsonify({"success": True, "message": f"Removed {email} from admins"})
+    return jsonify({"error": "Not found"}), 404
 
 # Catch-all for frontend
 @app.route('/', defaults={'path': ''})
