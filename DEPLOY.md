@@ -29,7 +29,7 @@ Since Render's Python environment doesn't build React apps by default, the easie
 1.  **New Web Service**: Connect your GitHub repo.
 2.  **Runtime**: Python 3.
 3.  **Build Command**: `pip install -r Project/Parse/requirements.txt`
-4.  **Start Command**: `gunicorn --timeout 300 --workers 2 --bind 0.0.0.0:$PORT Project.Parse.databaseAccess:app`
+4.  **Start Command**: `gunicorn --timeout 300 --workers 1 --bind 0.0.0.0:$PORT Project.Parse.databaseAccess:app`
     *   *Note: The `Procfile` in `Project/Parse/Procfile` also defines this.*
 5.  **Root Directory**: `Project/Parse` (Important!)
 
@@ -46,9 +46,9 @@ Go to the **Environment** tab in Render and add:
 To keep your PDF index from disappearing on every restart:
 1.  Go to **Disks** in Render.
 2.  Add a disk:
-    *   **Mount Path**: `/opt/render/.chroma_db_data`
+    *   **Mount Path**: `/var/data/chroma_db_data`
     *   **Size**: 1 GB
-3.  Add Env Var: `CHROMA_DB_PATH=/opt/render/.chroma_db_data`
+3.  Add Env Var: `CHROMA_DB_PATH=/var/data/chroma_db_data`
 
 ## 5. Troubleshooting
 *   **Timeout Errors**: We increased the timeout to 300s (5 mins) to allow the AI model to load.

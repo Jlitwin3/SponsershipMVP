@@ -115,24 +115,39 @@ else:
 # =========================================
 # 5. Flask Setup
 # =========================================
+print("Initializing Build Folder")
 BUILD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'Webapp', 'frontend', 'build')
+print("Build Folder Initialized")
+print("Initializing Flask App")
 app = Flask(__name__, static_folder=BUILD_FOLDER, static_url_path='/')
+print("Flask App Initialized")
 CORS(app)
+print("CORS started")
 
+print("Initializing Upload Folder")
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
+print("Upload Folder Initialized")
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+    print("NO UPLOAD FOLDER: Upload Folder Created")
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+print("Upload Folder Configured")
 
+print("Initializing Processing Status")
 processing_status = {"is_processing": False, "is_ready": True}
+print("Processing Status Initialized")
 chat_history = []
+print("Chat History Initialized")
 temp_documents = {'texts': [], 'is_processing': False, 'is_ready': False}
+print("Temp Documents Initialized")
 query_classifier = QueryClassifier()
+print("Query Classifier Initialized")
 
 # =========================================
 # 6. Helper Functions
 # =========================================
 def extract_sponsor_mentions(query: str) -> list:
+    print("Extracting Sponsor Mentions")
     sponsor_keywords = ["propose", "sponsor", "partnership", "deal", "agreement"]
     query_lower = query.lower()
     if not any(kw in query_lower for kw in sponsor_keywords):
@@ -181,17 +196,23 @@ def status():
 def chat():
     start_time = time.time()
     try:
+        print("getting data json")
         data = request.get_json(silent=True)
+        print("data json received")
         if not data or not data.get("query"):
-             return jsonify({"error": "No query provided"}), 400
+            print("No query provided")
+            return jsonify({"error": "No query provided"}), 400
         
         user_query = data.get("query")
         print(f"🚀 [DEBUG] Received chat query: {user_query}", flush=True)
 
         # 1. Classify
+        print("Classifying query")
         classification = query_classifier.classify(user_query)
+        print("Query classified")
         
         # 2. Sponsor DB Context
+        print("Getting sponsor context")
         sponsor_context = ""
         sponsor_mentions = classification['entities'] if classification['needs_db'] else extract_sponsor_mentions(user_query)
         
