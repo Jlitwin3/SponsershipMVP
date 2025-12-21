@@ -3,6 +3,8 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import numpy as np
+import fitz
+from io import BytesIO
 import chromadb
 from chromadb.utils import embedding_functions
 from flask import Flask, request, jsonify
@@ -441,6 +443,81 @@ def reset_db():
         return jsonify({"message": "Database collections reset. Please run dropbox_indexer.py manually to re-index."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/admin/upload", methods=["POST"])
+def admin_upload():
+    # Support both 'files' (multiple) and 'file' (single) keys
+    uploaded_files = request.files.getlist("files")
+    if not uploaded_files:
+        if 'file' in request.files:
+            uploaded_files = [request.files['file']]
+        else:
+            print("❌ No file part in request")
+            return jsonify({"error": "No file part"}), 400
+    
+    print(f"📂 Received {len(uploaded_files)} file(s)")
+    
+    success_count = 0
+    errors = []
+    
+    for file in uploaded_files:
+        if file.filename == '':
+            continue
+
+        if file and file.filename.lower().endswith('.pdf'):
+            print(f"📄 Processing PDF: {file.filename}")
+            filename = secure_filename(file.filename)
+            
+            try:
+                # 1. Extract Text
+                pdf_bytes = file.read()
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                text = "".join(page.get_text() for page in doc)
+                doc.close()
+
+                if not text.strip():
+                    errors.append(f"{filename}: No text found in PDF")
+                    continue
+
+                # 2. Chunk Text
+                size = 1000
+                chunks = [text[i:i+size] for i in range(0, len(text), size)]
+                
+                # 3. Generate IDs and Metadata
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                base_id = f"admin_{int(time.time())}_{filename}"
+                ids = [f"{base_id}_chunk{i}" for i in range(len(chunks))]
+                
+                metadatas = [{
+                    "source": filename,
+                    "type": "pdf",
+                    "upload_type": "admin_upload",
+                    "upload_date": timestamp
+                }] * len(chunks)
+
+                # 4. Add to ChromaDB
+                collection.add(
+                    ids=ids,
+                    documents=chunks,
+                    metadatas=metadatas
+                )
+                success_count += 1
+                print(f"✅ Indexed {len(chunks)} chunks from {filename}")
+
+            except Exception as e:
+                print(f"❌ Error processing {filename}: {str(e)}")
+                errors.append(f"{filename}: {str(e)}")
+        else:
+            errors.append(f"{file.filename}: Invalid file type (PDF only)")
+
+    if success_count > 0:
+        return jsonify({
+            "success": True, 
+            "message": f"Successfully indexed {success_count} file(s).",
+            "errors": errors if errors else None
+        })
+    else:
+        return jsonify({"error": "No files were successfully indexed", "details": errors}), 400
 
 @app.route("/api/admin/whitelist", methods=["GET"])
 def get_whitelist():
