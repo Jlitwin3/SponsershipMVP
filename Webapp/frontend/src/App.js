@@ -25,7 +25,6 @@ const msalInstance = new PublicClientApplication(msalConfig);
 function App() {
   const [isReady, setIsReady] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState(null);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -161,21 +160,10 @@ function App() {
             <h2>Processing Documents...</h2>
             <p>Loading PDFs and images from Dropbox. This may take a minute.</p>
           </div>
-        ) : isReady ? (
-          <ChatInterface />
         ) : (
-          <div className="error-container">
-            <h2>Error</h2>
-            <p>{error || 'Failed to load documents'}</p>
-          </div>
+          <ChatInterface />
         )}
       </main>
-
-      {error && isReady && (
-        <div className="error-message">
-          <span>❌ {error}</span>
-        </div>
-      )}
     </div>
   );
 }
