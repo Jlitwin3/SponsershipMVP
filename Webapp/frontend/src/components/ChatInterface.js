@@ -7,7 +7,7 @@ const ChatInterface = () => {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: 'Hello! I\'m ready to answer questions about sports sponsorship research. Ask me anything about the papers I\'ve analyzed.',
+      content: 'Hello! I\'m ready to answer questions about sports sponsorship research. Ask me anything!',
       timestamp: new Date()
     }
   ]);
