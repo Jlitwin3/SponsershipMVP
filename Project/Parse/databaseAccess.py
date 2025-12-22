@@ -423,12 +423,32 @@ def verify_chatbot_email():
 
 @app.route("/api/admin/files", methods=["GET"])
 def get_admin_files():
-    results = collection.get(where={"upload_type": "admin_upload"}, include=["metadatas"])
     files_dict = {}
-    for metadata in results["metadatas"]:
+    
+    # 1. Fetch from PDF collection
+    pdf_results = collection.get(include=["metadatas"])
+    for metadata in pdf_results["metadatas"]:
         name = metadata.get("source")
         if name and name not in files_dict:
-            files_dict[name] = {"name": name, "type": metadata.get("type", "PDF").upper(), "date": metadata.get("upload_date", "")[:10]}
+            files_dict[name] = {
+                "name": name, 
+                "type": metadata.get("type", "PDF").upper(), 
+                "date": metadata.get("upload_date", "")[:10],
+                "size": metadata.get("size", "Unknown")
+            }
+            
+    # 2. Fetch from Image collection
+    img_results = image_collection.get(include=["metadatas"])
+    for metadata in img_results["metadatas"]:
+        name = metadata.get("source")
+        if name and name not in files_dict:
+            files_dict[name] = {
+                "name": name, 
+                "type": metadata.get("type", "IMAGE").upper(), 
+                "date": metadata.get("upload_date", "")[:10],
+                "size": metadata.get("size", "Unknown")
+            }
+            
     return jsonify({"files": list(files_dict.values())})
 
 @app.route("/api/admin/reset_db", methods=["POST"])
@@ -454,15 +474,28 @@ def delete_admin_file():
         return jsonify({"error": "Filenames do not match or are empty"}), 400
 
     try:
-        # Delete from ChromaDB
-        # We need to find all IDs associated with this source
-        results = collection.get(where={"source": filename})
-        if results["ids"]:
-            collection.delete(ids=results["ids"])
-            return jsonify({"success": True, "message": f"Successfully deleted {filename} and its {len(results['ids'])} chunks."})
+        # 1. Delete from PDF Collection
+        pdf_results = collection.get(where={"source": filename})
+        pdf_deleted = 0
+        if pdf_results["ids"]:
+            collection.delete(ids=pdf_results["ids"])
+            pdf_deleted = len(pdf_results["ids"])
+
+        # 2. Delete from Image Collection
+        img_results = image_collection.get(where={"source": filename})
+        img_deleted = 0
+        if img_results["ids"]:
+            image_collection.delete(ids=img_results["ids"])
+            img_deleted = len(img_results["ids"])
+
+        if pdf_deleted > 0 or img_deleted > 0:
+            msg = f"Successfully deleted {filename}. Removed {pdf_deleted} PDF chunks and {img_deleted} image chunks."
+            print(f"🗑️ {msg}")
+            return jsonify({"success": True, "message": msg})
         else:
             return jsonify({"error": f"File {filename} not found in database"}), 404
     except Exception as e:
+        print(f"❌ Error deleting {filename}: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/admin/upload", methods=["POST"])
@@ -485,10 +518,11 @@ def admin_upload():
         if file.filename == '':
             continue
 
-        if file and file.filename.lower().endswith('.pdf'):
-            print(f"📄 Processing PDF: {file.filename}")
-            filename = secure_filename(file.filename)
-            
+        filename = secure_filename(file.filename)
+        file_ext = filename.lower().split('.')[-1]
+        
+        if file_ext == 'pdf':
+            print(f"📄 Processing PDF: {filename}")
             try:
                 # 1. Extract Text
                 pdf_bytes = file.read()
@@ -506,6 +540,7 @@ def admin_upload():
                 
                 # 3. Generate IDs and Metadata
                 timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                file_size_mb = f"{len(pdf_bytes) / (1024 * 1024):.2f} MB"
                 base_id = f"admin_{int(time.time())}_{filename}"
                 ids = [f"{base_id}_chunk{i}" for i in range(len(chunks))]
                 
@@ -513,7 +548,8 @@ def admin_upload():
                     "source": filename,
                     "type": "pdf",
                     "upload_type": "admin_upload",
-                    "upload_date": timestamp
+                    "upload_date": timestamp,
+                    "size": file_size_mb
                 }] * len(chunks)
 
                 # 4. Add to ChromaDB
@@ -528,8 +564,35 @@ def admin_upload():
             except Exception as e:
                 print(f"❌ Error processing {filename}: {str(e)}")
                 errors.append(f"{filename}: {str(e)}")
+        
+        elif file_ext in ['jpg', 'jpeg', 'png']:
+            print(f"🖼️ Processing Image: {filename}")
+            try:
+                img_bytes = file.read()
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                file_size_mb = f"{len(img_bytes) / (1024 * 1024):.2f} MB"
+                
+                # Context for image (consistent with dropbox_indexer.py)
+                context = f"Image file: {filename}\nUpload Type: Admin Upload\nDate: {timestamp}"
+                
+                image_collection.add(
+                    ids=[f"admin_{int(time.time())}_{filename}"],
+                    documents=[context],
+                    metadatas=[{
+                        "source": filename,
+                        "type": "image",
+                        "upload_type": "admin_upload",
+                        "upload_date": timestamp,
+                        "size": file_size_mb
+                    }]
+                )
+                success_count += 1
+                print(f"✅ Indexed image metadata for {filename}")
+            except Exception as e:
+                print(f"❌ Error processing {filename}: {str(e)}")
+                errors.append(f"{filename}: {str(e)}")
         else:
-            errors.append(f"{file.filename}: Invalid file type (PDF only)")
+            errors.append(f"{filename}: Invalid file type (PDF, JPG, JPEG, PNG only)")
 
     if success_count > 0:
         return jsonify({

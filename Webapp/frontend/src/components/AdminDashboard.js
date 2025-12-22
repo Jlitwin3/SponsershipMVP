@@ -11,6 +11,9 @@ const AdminDashboard = ({ onBack, onSignOut }) => {
   const [confirmFileName, setConfirmFileName] = useState('');
   const [deleteMessage, setDeleteMessage] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState('desc'); // 'desc' or 'asc'
+  const [filterType, setFilterType] = useState('All');
 
   // Whitelist management state (for regular users)
   const [whitelistedEmails, setWhitelistedEmails] = useState([]);
@@ -420,11 +423,30 @@ const AdminDashboard = ({ onBack, onSignOut }) => {
                   {/* Search and Filter */}
                   <div className="table-controls">
                     <div className="search-bar">
-                      <input type="text" placeholder="Search files..." />
+                      <input
+                        type="text"
+                        placeholder="Search files..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
                     </div>
                     <div className="filter-buttons">
-                      <button className="filter-btn">Filter by Type</button>
-                      <button className="filter-btn">Sort by Date</button>
+                      <select
+                        className="filter-btn"
+                        value={filterType}
+                        onChange={(e) => setFilterType(e.target.value)}
+                        style={{ appearance: 'none', cursor: 'pointer' }}
+                      >
+                        <option value="All">All Types</option>
+                        <option value="PDF">PDF</option>
+                        <option value="IMAGE">Image</option>
+                      </select>
+                      <button
+                        className="filter-btn"
+                        onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+                      >
+                        Sort: {sortOrder === 'desc' ? 'Newest' : 'Oldest'}
+                      </button>
                     </div>
                   </div>
 
@@ -447,14 +469,32 @@ const AdminDashboard = ({ onBack, onSignOut }) => {
                               Loading files...
                             </td>
                           </tr>
-                        ) : adminFiles.length === 0 ? (
-                          <tr>
-                            <td colSpan="5" style={{ textAlign: 'center', padding: '2rem' }}>
-                              No admin files uploaded yet. Upload files using the form on the right.
-                            </td>
-                          </tr>
-                        ) : (
-                          adminFiles.map((file, index) => (
+                        ) : (() => {
+                          const filtered = adminFiles
+                            .filter(file => {
+                              const matchesSearch = file.name.toLowerCase().includes(searchQuery.toLowerCase());
+                              const matchesType = filterType === 'All' || file.type.toUpperCase() === filterType.toUpperCase();
+                              return matchesSearch && matchesType;
+                            })
+                            .sort((a, b) => {
+                              const dateA = new Date(a.date || 0);
+                              const dateB = new Date(b.date || 0);
+                              return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+                            });
+
+                          if (filtered.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan="5" style={{ textAlign: 'center', padding: '2rem' }}>
+                                  {adminFiles.length === 0
+                                    ? "No admin files uploaded yet. Upload files using the form on the right."
+                                    : "No files match your search/filter criteria."}
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return filtered.map((file, index) => (
                             <tr key={index}>
                               <td>
                                 <div className="file-name-cell">
@@ -470,13 +510,34 @@ const AdminDashboard = ({ onBack, onSignOut }) => {
                               <td>{file.date}</td>
                               <td>
                                 <div className="action-buttons">
-                                  <button className="action-btn view-btn">View</button>
-                                  <button className="action-btn download-btn">Download</button>
+                                  <button
+                                    className="action-btn delete-btn"
+                                    onClick={() => {
+                                      setFileName(file.name);
+                                      setConfirmFileName(file.name);
+                                      // Scroll to delete section or just trigger it?
+                                      // Let's just set the state so they can click the big red button, 
+                                      // or we can add a direct delete with confirmation.
+                                      // For now, let's just make the big red button work better.
+                                      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                                    }}
+                                    style={{
+                                      padding: '0.25rem 0.5rem',
+                                      fontSize: '0.75rem',
+                                      backgroundColor: '#fee2e2',
+                                      color: '#dc2626',
+                                      border: '1px solid #fecaca',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Remove
+                                  </button>
                                 </div>
                               </td>
                             </tr>
-                          ))
-                        )}
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
