@@ -25,6 +25,7 @@
     transform: translateY(30px);
     opacity: 0;
   }
+
   to {
     transform: translateY(0);
     opacity: 1;
@@ -39,9 +40,12 @@
 }
 
 @keyframes bounce {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateY(0);
   }
+
   50% {
     transform: translateY(-10px);
   }
@@ -114,57 +118,6 @@
   text-align: left;
 }
 
-/* Divider */
-.divider {
-  display: flex;
-  align-items: center;
-  margin: 1.5rem 0;
-  color: #94a3b8;
-  font-size: 0.875rem;
-}
-
-.divider::before,
-.divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: #e2e8f0;
-}
-
-.divider span {
-  padding: 0 1rem;
-}
-
-/* Bypass Button */
-.bypass-btn {
-  width: 100%;
-  padding: 0.875rem 1.5rem;
-  background: linear-gradient(135deg, #1a4d2e 0%, #4d7c0f 100%);
-  border: none;
-  border-radius: 10px;
-  font-size: 1rem;
-  font-weight: 600;
-  color: white;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(26, 77, 46, 0.3);
-}
-
-.bypass-btn:hover {
-  background: linear-gradient(135deg, #153d24 0%, #3d6209 100%);
-  box-shadow: 0 4px 12px rgba(26, 77, 46, 0.4);
-  transform: translateY(-1px);
-}
-
-/* Bypass Info */
-.bypass-info {
-  margin-top: 1rem;
-  font-size: 0.8rem;
-  color: #94a3b8;
-  text-align: center;
-  line-height: 1.5;
-}
-
 /* Login Footer */
 .login-footer {
   margin-top: 2rem;
@@ -185,8 +138,13 @@
 
 /* Spinner Animation */
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Responsive */
